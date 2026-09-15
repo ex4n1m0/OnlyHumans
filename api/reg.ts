@@ -4,7 +4,11 @@
 import { Redis } from "@upstash/redis";
 import * as ed from "@noble/ed25519";
 
-const redis = Redis.fromEnv();
+
+function hubReady(): boolean {
+  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+}
+const redis = hubReady() ? Redis.fromEnv() : null;
 
 // Minimal protobuf decode of a libp2p PublicKey:
 // message PublicKey { required Type type = 1; required bytes data = 2; }
@@ -60,6 +64,12 @@ function canonical(peerId: string, pubB64: string, addrs: string[], ts: number):
 export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "PUT" && req.method !== "POST") {
     return Response.json({ error: "method not allowed" }, { status: 405 });
+  }
+  if (!redis) {
+    return Response.json(
+      { error: "hub storage not configured (set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN)" },
+      { status: 503 },
+    );
   }
   let body: any;
   try {
