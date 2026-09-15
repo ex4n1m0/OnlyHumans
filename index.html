@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OnlyHumans — peer-to-peer encrypted chat</title>
+<style>
+  :root { --teal: #17a2b8; --ink: #16262e; --bg: #0e1518; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: #d8e4e8; }
+  header { background: linear-gradient(135deg, #0d6e79, #17a2b8);
+           color: #fff; padding: 4.5rem 2rem; text-align: center; }
+  header h1 { font-size: 3rem; letter-spacing: .05em; }
+  header p { margin-top: .75rem; opacity: .92; font-size: 1.15rem; }
+  main { max-width: 740px; margin: 0 auto; padding: 3rem 1.5rem; }
+  main h2 { margin: 1.5rem 0 .5rem; }
+  main p, main li { line-height: 1.65; }
+  a { color: var(--teal); }
+  .card { background: #14202a; border: 1px solid #1f3038; border-radius: 10px;
+          padding: 1.2rem 1.4rem; margin: 1rem 0; }
+  footer { border-top: 1px solid #1f3038; margin-top: 3rem; padding: 1.5rem;
+           text-align: center; font-size: .85rem; color: #7d95a0; }
+  code { background: #0c2f37; padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OnlyHumans</h1>
+  <p>Peer-to-peer encrypted chat. No message servers — only an address hub.</p>
+</header>
+<main>
+  <div class="card">
+    <h2>How it works</h2>
+    <p>Your identity is a keypair generated on your device. The only shared
+    service is this address hub: a signed, expiring {peer &rarr; address}
+    directory. Messages travel directly between users; the conversation
+    initiator hosts the room, mints its random room key, and can rotate it at
+    any time — each new key is shared only with current participants,
+    encrypted under the key in use.</p>
+  </div>
+  <h2>Status</h2>
+  <p>Early development (M2). The hub API lives at
+  <code>/api/reg</code> and <code>/api/lookup/&lt;peerId&gt;</code>.</p>
+  <h2>Contact</h2>
+  <p>Development happens at
+  <a href="https://github.com/ex4n1m0/OnlyHumans">github.com/ex4n1m0/OnlyHumans</a>.</p>
+</main>
+<footer>onlyhumans.deepflux.space</footer>
+</body>
+</html>
