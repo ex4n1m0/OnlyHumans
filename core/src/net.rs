@@ -1,0 +1,614 @@
+//! The network node: a libp2p swarm speaking the room protocol over
+//! request-response, plus address-hub registration and dialing.
+//!
+//! M1 scope: direct connections (QUIC + TCP, noise-encrypted). Circuit
+//! relay v2 + DCUtR hole-punching are staged for the connectivity pass
+//! (see README) — the swarm composition keeps a slot for them.
+
+use crate::hub::HubClient;
+use crate::identity::Identity;
+use crate::rooms::{Envelope, RoomEvent, Rooms};
+use crate::store::Store;
+use futures::prelude::*;
+use libp2p::request_response::{self, Codec as _, ProtocolSupport};
+use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
+use libp2p::{identify, identity, multiaddr::Protocol, ping, Multiaddr, PeerId, Swarm};
+use std::collections::{HashMap, VecDeque};
+use std::path::Path;
+use std::str::FromStr;
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+pub const ROOM_PROTOCOL: &str = "/onlyhumans/room/1";
+
+// ---------------------------------------------------------------------------
+// Wire codec: 4-byte big-endian length + JSON
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct EnvelopeCodec;
+
+impl request_response::Codec for EnvelopeCodec {
+    type Protocol = String;
+    type Request = Envelope;
+    type Response = Envelope;
+
+    async fn read_request<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+    ) -> std::io::Result<Self::Request>
+    where
+        T: futures::AsyncRead + Unpin + Send,
+    {
+        read_json(io).await
+    }
+
+    async fn read_response<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+    ) -> std::io::Result<Self::Response>
+    where
+        T: futures::AsyncRead + Unpin + Send,
+    {
+        read_json(io).await
+    }
+
+    async fn write_request<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        req: Self::Request,
+    ) -> std::io::Result<()>
+    where
+        T: futures::AsyncWrite + Unpin + Send,
+    {
+        write_json(io, &req).await
+    }
+
+    async fn write_response<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        res: Self::Response,
+    ) -> std::io::Result<()>
+    where
+        T: futures::AsyncWrite + Unpin + Send,
+    {
+        write_json(io, &res).await
+    }
+}
+
+async fn read_json<T: futures::AsyncRead + Unpin + Send>(io: &mut T) -> std::io::Result<Envelope> {
+    let mut len = [0u8; 4];
+    io.read_exact(&mut len).await?;
+    let n = u32::from_be_bytes(len) as usize;
+    if n > 4 * 1024 * 1024 {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "frame too large"));
+    }
+    let mut buf = vec![0u8; n];
+    io.read_exact(&mut buf).await?;
+    serde_json::from_slice(&buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+async fn write_json<T: futures::AsyncWrite + Unpin + Send>(
+    io: &mut T,
+    env: &Envelope,
+) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec(env)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    io.write_all(&(bytes.len() as u32).to_be_bytes()).await?;
+    io.write_all(&bytes).await?;
+    io.close().await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Behaviour
+// ---------------------------------------------------------------------------
+
+#[derive(NetworkBehaviour)]
+pub struct Behaviour {
+    identify: identify::Behaviour,
+    ping: ping::Behaviour,
+    rooms: request_response::Behaviour<EnvelopeCodec>,
+}
+
+// ---------------------------------------------------------------------------
+// Node
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+pub enum Command {
+    /// Open (or resume) a conversation as host with `peer`.
+    OpenConversation { peer: String },
+    /// Direct dial by multiaddr (used before the hub exists / tests).
+    Dial { addr: Multiaddr },
+    /// Send a chat message in a room.
+    SendMessage { room: String, text: String },
+    /// Host-side key rotation.
+    Rotate { room: String },
+    /// Approve a pending join.
+    Approve { peer: String, room: String },
+    /// Ask a peer whether it hosts rooms for us.
+    Query { peer: String },
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum NodeEvent {
+    Listening { addr: String },
+    RoomReady { room: String, peer: String, we_are_host: bool, epoch: u64 },
+    Message { room: String, sender: String, body: String, epoch: u64 },
+    ApprovalRequested { room: String, peer: String },
+    Rotated { room: String, new_epoch: u64 },
+    ConnectionStateChanged { peer: String, connected: bool },
+    Log { message: String },
+}
+
+#[derive(Clone)]
+pub struct NodeHandle {
+    pub cmd_tx: mpsc::Sender<Command>,
+    pub peer_id: PeerId,
+}
+
+pub struct NodeConfig {
+    pub data_dir: std::path::PathBuf,
+    pub hub_base: Option<String>,
+    pub listen_quic: Option<u16>,
+    pub listen_tcp: Option<u16>,
+    pub auto_approve: bool,
+    /// Offline mode: skip hub registration entirely.
+    pub offline: bool,
+}
+
+impl Default for NodeConfig {
+    fn default() -> Self {
+        Self {
+            data_dir: std::env::temp_dir().join("onlyhumans"),
+            hub_base: None,
+            listen_quic: Some(0),
+            listen_tcp: Some(0),
+            auto_approve: false,
+            offline: false,
+        }
+    }
+}
+
+pub async fn spawn(
+    cfg: NodeConfig,
+    mut event_tx: mpsc::UnboundedSender<NodeEvent>,
+) -> anyhow::Result<NodeHandle> {
+    let identity = Identity::load_or_create(&cfg.data_dir)?;
+    let store = Store::open(&cfg.data_dir)?;
+    let peer_id = identity.peer_id();
+    let hub = HubClient::new(cfg.hub_base.as_deref().unwrap_or(crate::hub::DEFAULT_HUB));
+
+    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(identity.keypair().clone())
+        .with_tokio()
+        .with_tcp(
+            libp2p::tcp::Config::default().nodelay(true),
+            libp2p::noise::Config::new,
+            libp2p::yamux::Config::default,
+        )?
+        .with_quic()
+        .with_behaviour(|key| {
+            let identify = identify::Behaviour::new(identify::Config::new(
+                "onlyhumans/1".to_string(),
+                key.public(),
+            ));
+            let ping = ping::Behaviour::new(ping::Config::new());
+            let rooms = request_response::Behaviour::with_codec(
+                EnvelopeCodec,
+                [(ROOM_PROTOCOL.to_string(), ProtocolSupport::Full)],
+                request_response::Config::default()
+                    .with_request_timeout(Duration::from_secs(30))
+                    .with_max_concurrent_streams(64),
+            );
+            Behaviour { identify, ping, rooms }
+        })?
+        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(600)))
+        .build();
+
+    if let Some(port) = cfg.listen_quic {
+        swarm.listen_on(
+            Multiaddr::empty()
+                .with(Protocol::from("0.0.0.0".parse::<std::net::Ipv4Addr>().unwrap()))
+                .with(Protocol::Udp(port))
+                .with(Protocol::QuicV1),
+        )?;
+    }
+    if let Some(port) = cfg.listen_tcp {
+        swarm.listen_on(
+            Multiaddr::empty()
+                .with(Protocol::from("0.0.0.0".parse::<std::net::Ipv4Addr>().unwrap()))
+                .with(Protocol::Tcp(port)),
+        )?;
+    }
+
+    let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(64);
+
+    let mut rooms = Rooms::new(crate::global_key(), identity.id_string());
+    rooms.auto_approve = cfg.auto_approve;
+
+    let mut known_peers: HashMap<String, PeerId> = HashMap::new();
+    let mut outbox: HashMap<PeerId, VecDeque<Envelope>> = HashMap::new();
+    let mut connected: HashMap<PeerId, bool> = HashMap::new();
+
+    // Track rooms we host per peer so commands can find the room hex.
+    let mut hosted_for_peer: HashMap<PeerId, String> = HashMap::new();
+
+    let mut hub_interval = tokio::time::interval(Duration::from_secs(120));
+    hub_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut query_interval = tokio::time::interval(Duration::from_secs(90));
+
+    // rusqlite's Connection is !Sync; a std Mutex makes the task Send.
+    let store = std::sync::Mutex::new(store);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                Some(cmd) = cmd_rx.recv() => {
+                    handle_command(
+                        &mut swarm,
+                        &mut rooms,
+                        &store,
+                        &cmd,
+                        &identity,
+                        &hub,
+                        &mut known_peers,
+                        &mut outbox,
+                        &mut hosted_for_peer,
+                        &cfg,
+                        &mut event_tx,
+                    ).await;
+                }
+                _ = hub_interval.tick(), if !cfg.offline => {
+                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub).await {
+                        let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
+                    }
+                }
+                _ = query_interval.tick() => {
+                    // Poll contacts for rooms they host for us.
+                    for peer in known_peers.values().copied().collect::<Vec<_>>() {
+                        enqueue(&mut outbox, peer, Envelope::QueryRooms);
+                        flush_outbox(&mut swarm, &mut outbox, peer);
+                    }
+                }
+                ev = swarm.select_next_some() => {
+                    handle_swarm_event(
+                        &mut swarm,
+                        &mut rooms,
+                        ev,
+                        &store,
+                        &mut outbox,
+                        &mut connected,
+                        &mut event_tx,
+                    );
+                }
+            }
+        }
+    });
+
+    Ok(NodeHandle { cmd_tx, peer_id })
+}
+
+fn enqueue(outbox: &mut HashMap<PeerId, VecDeque<Envelope>>, peer: PeerId, env: Envelope) {
+    outbox.entry(peer).or_default().push_back(env);
+}
+
+fn flush_outbox(swarm: &mut Swarm<Behaviour>, outbox: &mut HashMap<PeerId, VecDeque<Envelope>>, peer: PeerId) {
+    if !swarm.is_connected(&peer) {
+        return;
+    }
+    if let Some(q) = outbox.get_mut(&peer) {
+        while let Some(env) = q.pop_front() {
+            swarm
+                .behaviour_mut()
+                .rooms
+                .send_request(&peer, env);
+        }
+    }
+}
+
+async fn register_with_hub(
+    swarm: &mut Swarm<Behaviour>,
+    identity: &Identity,
+    hub: &HubClient,
+) -> anyhow::Result<()> {
+    let my_ip = default_route_ip();
+    let mut addrs = Vec::new();
+    for l in swarm.listeners() {
+        // Rewrite 0.0.0.0 placeholders to our best local address.
+        let components: Vec<libp2p::multiaddr::Protocol<'_>> = l.iter().collect();
+        let mut ma = Multiaddr::empty();
+        for c in components {
+            match c {
+                Protocol::Ip4(ip) if ip.is_unspecified() => {
+                    ma.push(Protocol::from(my_ip));
+                }
+                other => ma.push(other),
+            }
+        }
+        addrs.push(ma.to_string());
+    }
+    if addrs.is_empty() {
+        anyhow::bail!("no listening addresses yet");
+    }
+    hub.register(identity, addrs).await
+}
+
+fn default_route_ip() -> std::net::Ipv4Addr {
+    std::net::UdpSocket::bind("0.0.0.0:0")
+        .and_then(|s| {
+            s.connect("8.8.8.8:80")?;
+            s.local_addr()
+        })
+        .map(|a| match a.ip() {
+            std::net::IpAddr::V4(v4) => v4,
+            std::net::IpAddr::V6(_) => "127.0.0.1".parse().unwrap(),
+        })
+        .unwrap_or_else(|_| "127.0.0.1".parse().unwrap())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_command(
+    swarm: &mut Swarm<Behaviour>,
+    rooms: &mut Rooms,
+    store: &std::sync::Mutex<Store>,
+    cmd: &Command,
+    identity: &Identity,
+    hub: &HubClient,
+    known_peers: &mut HashMap<String, PeerId>,
+    outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    hosted_for_peer: &mut HashMap<PeerId, String>,
+    cfg: &NodeConfig,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+) {
+    match cmd {
+        Command::OpenConversation { peer } => {
+            let Ok(pid) = PeerId::from_str(peer) else {
+                let _ = event_tx.send(NodeEvent::Log { message: format!("invalid peer id: {peer}") });
+                return;
+            };
+            known_peers.insert(peer.clone(), pid);
+            let (room_hex, ev) = rooms.host_open_room(pid);
+            hosted_for_peer.insert(pid, room_hex);
+            if let RoomEvent::Send { peer: to, envelope } = ev {
+                enqueue(outbox, to, envelope);
+            }
+            dial_peer(swarm, hub, identity, pid, cfg, event_tx).await;
+        }
+        Command::Dial { addr } => {
+            if let Err(e) = swarm.dial(addr.clone()) {
+                let _ = event_tx.send(NodeEvent::Log { message: format!("dial failed: {e}") });
+            }
+        }
+        Command::SendMessage { room, text } => {
+            if let Some(frame) = rooms.seal_chat(room, text.as_bytes()) {
+                if let Some(st) = rooms.room(room) {
+                    let peer = st.peer;
+                    enqueue(
+                        outbox,
+                        peer,
+                        Envelope::Chat { frame },
+                    );
+                    flush_outbox(swarm, outbox, peer);
+                }
+            } else {
+                let _ = event_tx.send(NodeEvent::Log { message: format!("unknown room {room}") });
+            }
+        }
+        Command::Rotate { room } => {
+            if let Some(frame) = rooms.rotate(room) {
+                if let Some(st) = rooms.room(room) {
+                    let _ = store.lock().unwrap().upsert_conversation(
+                        room,
+                        &st.peer.to_string(),
+                        st.role == crate::rooms::Role::Host,
+                        st.crypto.room_key(),
+                        st.crypto.epoch,
+                    );
+                }
+                if let Some(st) = rooms.room(room) {
+                    let peer = st.peer;
+                    enqueue(outbox, peer, Envelope::Rotate { frame });
+                    flush_outbox(swarm, outbox, peer);
+                }
+            }
+        }
+        Command::Approve { peer, room } => {
+            if let Ok(pid) = PeerId::from_str(peer) {
+                for ev in rooms.deliver_key_to(room, pid) {
+                    if let RoomEvent::Send { peer: to, envelope } = ev {
+                        enqueue(outbox, to, envelope);
+                    }
+                }
+                flush_outbox(swarm, outbox, pid);
+            }
+        }
+        Command::Query { peer } => {
+            if let Ok(pid) = PeerId::from_str(peer) {
+                enqueue(outbox, pid, Envelope::QueryRooms);
+                flush_outbox(swarm, outbox, pid);
+            }
+        }
+    }
+}
+
+async fn dial_peer(
+    swarm: &mut Swarm<Behaviour>,
+    hub: &HubClient,
+    identity: &Identity,
+    pid: PeerId,
+    cfg: &NodeConfig,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+) {
+    if swarm.is_connected(&pid) {
+        return;
+    }
+    if !cfg.offline {
+        if let Ok(Some(reg)) = hub.lookup(&pid.to_string()).await {
+            for a in &reg.addrs {
+                if let Ok(ma) = a.parse::<Multiaddr>() {
+                    let _ = swarm.dial(ma.with(Protocol::P2p(pid)));
+                }
+            }
+            let _ = identity; // signature already verified inside lookup
+        }
+    }
+    let _ = event_tx;
+}
+
+fn handle_swarm_event(
+    swarm: &mut Swarm<Behaviour>,
+    rooms: &mut Rooms,
+    ev: SwarmEvent<BehaviourEvent>,
+    store: &std::sync::Mutex<Store>,
+    outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    connected: &mut HashMap<PeerId, bool>,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+) {
+    match ev {
+        SwarmEvent::NewListenAddr { address, .. } => {
+            let _ = event_tx.send(NodeEvent::Listening { addr: address.to_string() });
+        }
+        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+            connected.insert(peer_id, true);
+            let _ = event_tx.send(NodeEvent::ConnectionStateChanged {
+                peer: peer_id.to_string(),
+                connected: true,
+            });
+            flush_outbox(swarm, outbox, peer_id);
+        }
+        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+            connected.insert(peer_id, false);
+            let _ = event_tx.send(NodeEvent::ConnectionStateChanged {
+                peer: peer_id.to_string(),
+                connected: false,
+            });
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::Rooms(rr_ev)) => match rr_ev {
+            request_response::Event::Message { peer, message, .. } => {
+                match message {
+                    request_response::Message::Request { request, channel, .. } => {
+                        let is_contact = store.lock().unwrap().is_contact(&peer.to_string());
+                        let events = rooms.handle(peer, request, is_contact);
+                        persist_room_state(rooms, &store, &peer, &events);
+                        for ev in events {
+                            dispatch_room_event(swarm, outbox, &peer, ev, event_tx);
+                        }
+                        // Always acknowledge requests.
+                        let _ = swarm
+                            .behaviour_mut()
+                            .rooms
+                            .send_response(channel, Envelope::Ack);
+                    }
+                    request_response::Message::Response { response, .. } => {
+                        let is_contact = store.lock().unwrap().is_contact(&peer.to_string());
+                        let events = rooms.handle(peer, response, is_contact);
+                        persist_room_state(rooms, &store, &peer, &events);
+                        for ev in events {
+                            dispatch_room_event(swarm, outbox, &peer, ev, event_tx);
+                        }
+                    }
+                }
+            }
+            request_response::Event::OutboundFailure { peer, error, .. } => {
+                let _ = event_tx.send(NodeEvent::Log {
+                    message: format!("outbound to {peer} failed: {error}"),
+                });
+            }
+            request_response::Event::InboundFailure { peer, error, .. } => {
+                let _ = event_tx.send(NodeEvent::Log {
+                    message: format!("inbound from {peer} failed: {error}"),
+                });
+            }
+            _ => {}
+        },
+        SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
+            peer_id,
+            info,
+            ..
+        })) => {
+            // Learn observed addresses for future dials.
+            for ma in info.listen_addrs {
+                if !swarm.is_connected(&peer_id) {
+                    let _ = swarm.dial(ma.with(Protocol::P2p(peer_id)));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Persist room key/epoch whenever a room becomes ready or rotates.
+fn persist_room_state(
+    rooms: &mut Rooms,
+    store: &std::sync::Mutex<Store>,
+    peer: &libp2p::PeerId,
+    events: &[RoomEvent],
+) {
+    use crate::rooms::Role;
+    for ev in events {
+        let hex = match ev {
+            RoomEvent::RoomReady { room_id_hex, .. } => room_id_hex.clone(),
+            RoomEvent::Rotated { room_id_hex, .. } => room_id_hex.clone(),
+            _ => continue,
+        };
+        if let Some(st) = rooms.room(&hex) {
+            let is_host = st.role == Role::Host;
+            let epoch = st.crypto.epoch;
+            let key = *st.crypto.room_key();
+            let _ = store
+                .lock()
+                .unwrap()
+                .upsert_conversation(&hex, &peer.to_string(), is_host, &key, epoch);
+        }
+    }
+}
+
+fn dispatch_room_event(
+    swarm: &mut Swarm<Behaviour>,
+    outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    from: &PeerId,
+    ev: RoomEvent,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+) {
+    match ev {
+        RoomEvent::Send { peer, envelope } => {
+            enqueue(outbox, peer, envelope);
+            flush_outbox(swarm, outbox, peer);
+        }
+        RoomEvent::RoomReady { room_id_hex, peer, role, epoch } => {
+            let _ = event_tx.send(NodeEvent::RoomReady {
+                room: room_id_hex,
+                peer: peer.to_string(),
+                we_are_host: role == crate::rooms::Role::Host,
+                epoch,
+            });
+        }
+        RoomEvent::Message { room_id_hex, sender, body, epoch } => {
+            let _ = event_tx.send(NodeEvent::Message {
+                room: room_id_hex,
+                sender,
+                body: String::from_utf8_lossy(&body).into_owned(),
+                epoch,
+            });
+        }
+        RoomEvent::ApprovalRequested { room_id_hex, peer } => {
+            let _ = event_tx.send(NodeEvent::ApprovalRequested {
+                room: room_id_hex,
+                peer: peer.to_string(),
+            });
+        }
+        RoomEvent::Rotated { room_id_hex, new_epoch } => {
+            let _ = event_tx.send(NodeEvent::Rotated { room: room_id_hex, new_epoch });
+        }
+        RoomEvent::ProtocolError { context } => {
+            let _ = event_tx.send(NodeEvent::Log { message: context });
+        }
+    }
+    let _ = from;
+}
