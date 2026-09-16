@@ -68,6 +68,14 @@ pub struct RoomState {
     /// Host: this room was opened (or re-sent) at the guest's own request,
     /// so their Join is admitted without a UI approval.
     pub invited: bool,
+    /// Guest: the user already accepted THIS room's invitation. A later
+    /// re-Invite (e.g. the host's 90 s QueryRooms resume) is answered with
+    /// an automatic re-Join instead of another consent prompt.
+    consented: bool,
+    /// Guest: a real room key has been installed (vs. the pre-delivery
+    /// placeholder). Re-deliveries for a keyed room are ignored so replay
+    /// guards (seen_seq) survive resume cycles.
+    has_key: bool,
 }
 
 /// Outcome of host-side admission handling.
@@ -153,6 +161,8 @@ impl Rooms {
                 my_seq: now_seed(),
                 seen_seq: HashMap::new(),
                 invited: true,
+                consented: true,
+                has_key: true,
             },
         );
         let ev = self.invite_for(&room_hex);
@@ -176,27 +186,36 @@ impl Rooms {
                 my_seq: now_seed(),
                 seen_seq: HashMap::new(),
                 invited: true,
+                consented: true,
+                has_key: true,
             },
         );
     }
 
     /// Guest: accept a received invitation by sending our Join.
     pub fn accept_invitation(&mut self, room_hex: &str, host: PeerId) -> Option<RoomEvent> {
-        if !self.rooms.contains_key(room_hex) {
+        if let Some(st) = self.rooms.get_mut(room_hex) {
+            st.consented = true;
+        } else {
             return None;
         }
+        Some(RoomEvent::Send {
+            peer: host,
+            envelope: self.join_envelope(room_hex),
+        })
+    }
+
+    /// Build the Join envelope with a fresh GK proof.
+    fn join_envelope(&self, room_hex: &str) -> Envelope {
         let mut gnonce = [0u8; 16];
         rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut gnonce);
         let gproof = crypto::admission_proof(&self.gk, &self.my_id, &gnonce);
-        Some(RoomEvent::Send {
-            peer: host,
-            envelope: Envelope::Join {
-                room_id_hex: room_hex.to_string(),
-                guest_id: self.my_id.clone(),
-                guest_nonce_b64: crypto::base64_encode(&gnonce),
-                guest_proof_b64: crypto::base64_encode(&gproof),
-            },
-        })
+        Envelope::Join {
+            room_id_hex: room_hex.to_string(),
+            guest_id: self.my_id.clone(),
+            guest_nonce_b64: crypto::base64_encode(&gnonce),
+            guest_proof_b64: crypto::base64_encode(&gproof),
+        }
     }
 
     fn invite_for(&self, room_hex: &str) -> RoomEvent {
@@ -219,6 +238,9 @@ impl Rooms {
     /// Seal a chat message for a room we are in.
     pub fn seal_chat(&mut self, room_hex: &str, body: &[u8]) -> Option<Sealed> {
         let st = self.rooms.get_mut(room_hex)?;
+        if !st.has_key {
+            return None; // guest still awaiting KeyDelivery
+        }
         st.my_seq += 1;
         Some(st.crypto.seal(&self.my_id, st.my_seq, crypto::kinds::CHAT, body))
     }
@@ -290,22 +312,37 @@ impl Rooms {
                 // If we already have a working room with this host, treat a
                 // re-invite as a resume and ask the UI again only for new
                 // rooms. Placeholder crypto until KeyDelivery arrives.
-                let known = self.rooms.contains_key(&room_id_hex);
-                if !known {
-                    self.rooms.insert(
-                        room_id_hex.clone(),
-                        RoomState {
-                            crypto: RoomCrypto::from_delivered(room_id, [0u8; 32]),
-                            role: Role::Guest,
+                let known = self.rooms.get(&room_id_hex);
+                match known {
+                    None => {
+                        self.rooms.insert(
+                            room_id_hex.clone(),
+                            RoomState {
+                                crypto: RoomCrypto::from_delivered(room_id, [0u8; 32]),
+                                role: Role::Guest,
+                                peer: from,
+                                my_seq: now_seed(),
+                                seen_seq: HashMap::new(),
+                                invited: true,
+                                consented: false,
+                                has_key: false,
+                            },
+                        );
+                    }
+                    Some(st) if st.consented => {
+                        // Resume: we already accepted this room; answer with
+                        // an automatic re-Join so the host re-delivers only
+                        // if we never got the key. No UI prompt.
+                        out.push(RoomEvent::Send {
                             peer: from,
-                            my_seq: now_seed(),
-                            seen_seq: HashMap::new(),
-                            invited: true,
-                        },
-                    );
+                            envelope: self.join_envelope(&room_id_hex),
+                        });
+                        return out;
+                    }
+                    Some(_) => {}
                 }
                 // The INVITED side consents — the inviter already did by
-                // inviting.
+                // inviting. (Re-emitted while still pending.)
                 out.push(RoomEvent::InvitationReceived {
                     room_id_hex,
                     host: from,
@@ -402,6 +439,15 @@ impl Rooms {
                         return out;
                     }
                 };
+                // Resume cycle: if we already hold the key for this room
+                // (e.g. the host re-delivered after its QueryRooms
+                // re-invite), keep our state — replacing it would wipe the
+                // replay guard.
+                if let Some(st) = self.rooms.get(&room_id_hex) {
+                    if st.has_key {
+                        return out;
+                    }
+                }
                 let st = RoomState {
                     crypto: RoomCrypto::from_delivered(room_id, key),
                     role: Role::Guest,
@@ -409,6 +455,8 @@ impl Rooms {
                     my_seq: now_seed(),
                     seen_seq: HashMap::new(),
                     invited: true,
+                    consented: true,
+                    has_key: true,
                 };
                 out.push(RoomEvent::RoomReady {
                     room_id_hex: room_id_hex.clone(),

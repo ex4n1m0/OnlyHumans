@@ -37,6 +37,15 @@ fn temp_dir(name: &str) -> std::path::PathBuf {
     d
 }
 
+/// Non-blocking snapshot of events waiting in the channel.
+async fn drain_pending(rx: &mut mpsc::UnboundedReceiver<NodeEvent>) -> Vec<NodeEvent> {
+    let mut out = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        out.push(ev);
+    }
+    out
+}
+
 #[tokio::test]
 async fn two_nodes_full_room_lifecycle() {
     // Node B (guest) listens on a fixed QUIC port so A can dial it.
@@ -167,9 +176,51 @@ async fn two_nodes_full_room_lifecycle() {
     // --- Second rotation, then B replies (guest under epoch 3) ---
     a.cmd_tx.send(Command::Rotate { room }).await.unwrap();
     let rotated = next_event(&mut b_rx, "rotated").await;
-    match rotated {
-        NodeEvent::Rotated { new_epoch, .. } => assert_eq!(new_epoch, 3),
+    let r3room = match rotated {
+        NodeEvent::Rotated { room, new_epoch } => {
+            assert_eq!(new_epoch, 3);
+            room
+        }
         other => panic!("expected second rotation, got {other:?}"),
+    };
+
+    // --- Resume cycle: re-opening the conversation must REUSE the room and
+    // must NOT re-prompt the guest (the host's periodic QueryRooms
+    // re-invite takes this same path).
+    a.cmd_tx
+        .send(Command::OpenConversation { peer: b.peer_id.to_string() })
+        .await
+        .unwrap();
+    // Give the envelope round-trip time to land, then prove liveness with
+    // a chat under the still-current key.
+    a.cmd_tx
+        .send(Command::SendMessage { room: r3room.clone(), text: "resume ok".into() })
+        .await
+        .unwrap();
+    let msg = next_event(&mut b_rx, "message").await;
+    match msg {
+        NodeEvent::Message { body, epoch, .. } => {
+            assert_eq!(body, "resume ok");
+            assert_eq!(epoch, 3);
+        }
+        other => panic!("expected post-resume message, got {other:?}"),
     }
-    // (room moved above; re-derive from the ready event we kept? use b's last rotated room)
+    // No fresh invitation may be pending on B: consent was already given,
+    // so the re-invite auto-re-Joins silently.
+    let pending = drain_pending(&mut b_rx).await;
+    assert!(
+        !pending
+            .iter()
+            .any(|ev| matches!(ev, NodeEvent::InvitationReceived { .. })),
+        "re-open must not re-prompt the guest, got {pending:?}"
+    );
+    // And the host reused the SAME room (B's auto re-Join made the host
+    // re-deliver, which emits RoomReady for the same room id).
+    let a_ready2 = next_event(&mut a_rx, "room_ready").await;
+    match a_ready2 {
+        NodeEvent::RoomReady { room, we_are_host: true, .. } => {
+            assert_eq!(room, r3room, "re-open must reuse the existing room");
+        }
+        other => panic!("expected host RoomReady on resume, got {other:?}"),
+    }
 }

@@ -144,6 +144,8 @@ pub enum Command {
     ReserveWith { addr: Multiaddr },
     /// Guest: accept a received invitation.
     AcceptInvitation { room: String, host: String },
+    /// Stop the node task (releases ports + DB so a restart can rebind).
+    Shutdown,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -311,6 +313,9 @@ pub async fn spawn(
         loop {
             tokio::select! {
                 Some(cmd) = cmd_rx.recv() => {
+                    if matches!(cmd, Command::Shutdown) {
+                        break;
+                    }
                     handle_command(
                         &mut swarm,
                         &mut rooms,
@@ -451,6 +456,8 @@ async fn handle_command(
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
 ) {
     match cmd {
+        // Handled by the run loop (breaks the select); unreachable here.
+        Command::Shutdown => {}
         Command::OpenConversation { peer } => {
             let Ok(pid) = PeerId::from_str(peer) else {
                 let _ = event_tx.send(NodeEvent::Log { message: format!("invalid peer id: {peer}") });
@@ -481,7 +488,11 @@ async fn handle_command(
                     flush_outbox(swarm, outbox, peer);
                 }
             } else {
-                let _ = event_tx.send(NodeEvent::Log { message: format!("unknown room {room}") });
+                let _ = event_tx.send(NodeEvent::Log {
+                    message: format!(
+                        "cannot send in {room}: no key yet (still joining) or unknown room"
+                    ),
+                });
             }
         }
         Command::Rotate { room } => {
