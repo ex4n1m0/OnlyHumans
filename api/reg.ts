@@ -61,8 +61,18 @@ function libp2pEd25519Key(buf: Uint8Array): Uint8Array | null {
     }
     const val = buf.subarray(i, i + len);
     i += len;
-    if (key === 1) type = new DataView(val.buffer, val.byteOffset).getInt32(0);
-    else if (key === 2) data = val;
+    if (key === 1) {
+      // varint decode (protobuf integers are base-128)
+      let v = 0;
+      let sh = 0;
+      for (const b of val) {
+        v |= (b & 0x7f) << sh;
+        sh += 7;
+      }
+      type = v;
+    } else if (key === 2) {
+      data = val;
+    }
   }
   if (type !== 1 || !data || data.length !== 32) return null;
   return data;
