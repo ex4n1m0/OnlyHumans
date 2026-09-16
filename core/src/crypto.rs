@@ -385,6 +385,7 @@ pub mod kinds {
     pub const CHAT: &[u8; 8] = b"chat\0\0\0\0";
     pub const ROTATE: &[u8; 8] = b"rotate\0\0";
     pub const MEMBERS: &[u8; 8] = b"members\0";
+    pub const CLEAR: &[u8; 8] = b"clear\0\0\0";
 }
 
 #[cfg(test)]

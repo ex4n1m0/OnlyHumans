@@ -11,6 +11,7 @@ type NodeEvent =
   | { kind: "roomReady"; room: string; peer: string; weAreHost: boolean; epoch: number }
   | { kind: "message"; room: string; sender: string; body: string; epoch: number }
   | { kind: "membersChanged"; room: string; members: string[] }
+  | { kind: "messagesCleared"; room: string }
   | { kind: "rotated"; room: string; newEpoch: number }
   | { kind: "connectionStateChanged"; peer: string; connected: boolean }
   | { kind: "log"; message: string };
@@ -46,6 +47,8 @@ async function main() {
   let hostPeer = "";
   let members: string[] = [];
   let renamingPeer: string | null = null;
+  let clearArmed = false;
+  let clearTimer: number | undefined;
   let messages: ChatMessage[] = [];
 
   render();
@@ -57,9 +60,7 @@ async function main() {
   async function onNodeEvent(p: NodeEvent) {
     switch (p.kind) {
       case "message": {
-        await invoke("record_message", {
-          room: p.room, sender: p.sender, body: p.body, epoch: p.epoch,
-        });
+        // The core persists history; the UI just refreshes from the store.
         if (p.room === room || room === null) {
           room = p.room;
           await refreshMessages();
@@ -87,6 +88,12 @@ async function main() {
       }
       case "joinStatus": {
         status = p.status;
+        render();
+        break;
+      }
+      case "messagesCleared": {
+        room = p.room;
+        messages = [];
         render();
         break;
       }
@@ -181,6 +188,9 @@ async function main() {
           <div class="titlebar">
             <span class="status">${statusLine()} · key epoch ${epoch}</span>
             ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
+            <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
+              ${clearArmed ? "Really clear for everyone?" : "Clear history"}
+            </button>
           </div>
           <div class="messages" id="msgs">
             ${messages.map((m) => `
@@ -274,6 +284,24 @@ async function main() {
       toast("Key rotated — new key sent to current members only");
     });
 
+    document.getElementById("clear-hist")?.addEventListener("click", async () => {
+      if (!clearArmed) {
+        // Destructive global action: require a second click within 8s.
+        clearArmed = true;
+        render();
+        clearTimer = window.setTimeout(() => {
+          clearArmed = false;
+          render();
+        }, 8000);
+        return;
+      }
+      window.clearTimeout(clearTimer);
+      clearArmed = false;
+      await invoke("clear_history");
+      toast("History cleared for everyone in the room");
+      render();
+    });
+
     async function sendCurrent() {
       const input = document.getElementById("send-text") as HTMLInputElement | null;
       if (!input || !room) return;
@@ -281,10 +309,6 @@ async function main() {
       if (!text) return;
       input.value = "";
       await invoke("send_message", { text });
-      await invoke("record_message", {
-        room, sender: myId, body: text,
-        epoch, outgoing: true,
-      });
       await refreshMessages();
       render();
     }

@@ -44,6 +44,10 @@ pub enum Envelope {
     Chat { frame: Sealed },
     /// Host -> members: rotation payload sealed under the current key.
     Rotate { frame: Sealed },
+    /// Any member: request that everyone wipes their local message history
+    /// for this room. Sealed like a chat frame (kind `clear`) so only room
+    /// members can issue it.
+    Clear { frame: Sealed },
     /// Member -> members: leaving the room.
     Leave { room_id_hex: String },
     Ack,
@@ -112,6 +116,8 @@ pub enum RoomEvent {
     Message { room_id_hex: String, sender: String, body: Vec<u8>, epoch: u64 },
     /// The member list changed.
     MembersChanged { room_id_hex: String, members: Vec<String> },
+    /// Every participant should wipe its local message history.
+    MessagesCleared { room_id_hex: String },
     /// A key rotation was applied.
     Rotated { room_id_hex: String, new_epoch: u64 },
     ProtocolError { context: String },
@@ -228,6 +234,16 @@ impl Rooms {
         }
         st.my_seq += 1;
         Some(st.crypto.seal(&self.my_id, st.my_seq, crypto::kinds::CHAT, body))
+    }
+
+    /// Build the sealed clear-history frame (one per member fan-out).
+    pub fn clear_envelope(&mut self) -> Option<Sealed> {
+        let st = self.room.as_mut()?;
+        if !st.has_key {
+            return None;
+        }
+        st.my_seq += 1;
+        Some(st.crypto.seal(&self.my_id, st.my_seq, crypto::kinds::CLEAR, b""))
     }
 
     /// Host: rotate the room key. Returns the sealed rotation frame (to
@@ -444,6 +460,13 @@ impl Rooms {
                         }
                     }
                     Err(e) => out.push(err(&format!("rotate: {e}"))),
+                }
+            }
+            Envelope::Clear { frame } => {
+                let room_hex = frame.room_id_hex.clone();
+                match self.open_frame(&frame, crypto::kinds::CLEAR) {
+                    Ok(_) => out.push(RoomEvent::MessagesCleared { room_id_hex: room_hex }),
+                    Err(e) => out.push(err(&format!("clear: {e}"))),
                 }
             }
             Envelope::Leave { room_id_hex } => {

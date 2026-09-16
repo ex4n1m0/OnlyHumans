@@ -147,6 +147,14 @@ impl Store {
         Ok(rows)
     }
 
+    /// Delete every stored message of a room (the room itself survives).
+    pub fn clear_messages(&self, room_id_hex: &str) -> anyhow::Result<()> {
+        self.conn
+            .execute("DELETE FROM messages WHERE room_id_hex=?1", params![room_id_hex])
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
     /// Record a peer as a contact without clobbering a user-set name.
     pub fn add_contact_if_absent(&self, peer_id: &str) -> anyhow::Result<()> {
         self.conn

@@ -133,6 +133,8 @@ pub enum Command {
     SendMessage { text: String },
     /// Host-side key rotation.
     Rotate,
+    /// Wipe the room's message history on every participant.
+    ClearHistory,
     /// Explicitly reserve a relay circuit; `addr` is the relay's full
     /// address ending in /p2p/<relay_id> (tests, port-forwarded hosts).
     ReserveWith { addr: Multiaddr },
@@ -151,6 +153,7 @@ pub enum NodeEvent {
     RoomReady { room: String, peer: String, we_are_host: bool, epoch: u64 },
     Message { room: String, sender: String, body: String, epoch: u64 },
     MembersChanged { room: String, members: Vec<String> },
+    MessagesCleared { room: String },
     Rotated { room: String, new_epoch: u64 },
     ConnectionStateChanged { peer: String, connected: bool },
     Log { message: String },
@@ -533,7 +536,13 @@ async fn handle_command(
         }
         Command::SendMessage { text } => {
             if let Some(frame) = rooms.seal_chat(text.as_bytes()) {
-                // Mesh fan-out: one sealed frame, delivered to every member.
+                // Record our own copy first, then fan out to the mesh.
+                let room = rooms.room_hex().to_string();
+                let epoch = rooms.state().map(|st| st.crypto.epoch).unwrap_or(1);
+                let _ = store
+                    .lock()
+                    .unwrap()
+                    .append_message(&room, &identity.id_string(), text.as_str(), epoch, true);
                 for peer in rooms.member_peers() {
                     if peer == identity.peer_id() {
                         continue;
@@ -560,6 +569,25 @@ async fn handle_command(
             } else {
                 let _ = event_tx.send(NodeEvent::Log {
                     message: "only the host can rotate".into(),
+                });
+            }
+        }
+        Command::ClearHistory => {
+            if let Some(frame) = rooms.clear_envelope() {
+                // Local wipe first, then fan the sealed request out.
+                let room = rooms.room_hex().to_string();
+                let _ = store.lock().unwrap().clear_messages(&room);
+                let _ = event_tx.send(NodeEvent::MessagesCleared { room: room.clone() });
+                for peer in rooms.member_peers() {
+                    if peer == identity.peer_id() {
+                        continue;
+                    }
+                    enqueue(outbox, peer, Envelope::Clear { frame: frame.clone() });
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
+                }
+            } else {
+                let _ = event_tx.send(NodeEvent::Log {
+                    message: "cannot clear: still joining the room".into(),
                 });
             }
         }
@@ -939,6 +967,18 @@ fn process_room_events(
     for ev in events {
         match ev {
             RoomEvent::RoomReady { .. } | RoomEvent::Rotated { .. } => persist_room(rooms, store),
+            RoomEvent::MessagesCleared { room_id_hex } => {
+                let _ = store.lock().unwrap().clear_messages(room_id_hex);
+            }
+            RoomEvent::Message { room_id_hex, sender, body, epoch } => {
+                // Persist inbound history in the core (UI-independent).
+                let outgoing = sender == rooms.my_id();
+                let text = String::from_utf8_lossy(body).into_owned();
+                let _ = store
+                    .lock()
+                    .unwrap()
+                    .append_message(room_id_hex, sender, &text, *epoch, outgoing);
+            }
             RoomEvent::MembersChanged { members, .. } => {
                 let mut s = store.lock().unwrap();
                 for m in members {
@@ -982,6 +1022,9 @@ fn dispatch_room_event(
         }
         RoomEvent::MembersChanged { room_id_hex, members } => {
             let _ = event_tx.send(NodeEvent::MembersChanged { room: room_id_hex, members });
+        }
+        RoomEvent::MessagesCleared { room_id_hex } => {
+            let _ = event_tx.send(NodeEvent::MessagesCleared { room: room_id_hex });
         }
         RoomEvent::Rotated { room_id_hex, new_epoch } => {
             let _ = event_tx.send(NodeEvent::Rotated { room: room_id_hex, new_epoch });
