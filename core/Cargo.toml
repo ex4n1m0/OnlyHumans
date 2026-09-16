@@ -3,6 +3,9 @@ name = "onlyhumans_core"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+rand = "0.8"
+
 [dependencies]
 anyhow = "1.0.104"
 async-trait = "0.1.92"
