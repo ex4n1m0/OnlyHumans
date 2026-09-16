@@ -84,6 +84,15 @@ function libp2pEd25519Key(buf: Uint8Array): Uint8Array | null {
   if (type !== 1 || !data || data.length !== 32) return null;
   return data;
 }
+
+function b64decode(s: string): Uint8Array {
+  const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const vals: number[] = [];
+  for (const c of s) {
+    const idx = ALPHA.indexOf(c);
+    if (idx < 0) throw new Error("bad b64 char");
+    vals.push(idx);
+  }
   const out: number[] = [];
   for (let j = 0; j < vals.length; j += 4) {
     const c = vals.slice(j, j + 4);

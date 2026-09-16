@@ -3,5 +3,9 @@
   "private": true,
   "dependencies": {
     "@vercel/node": "^3.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
   }
 }
