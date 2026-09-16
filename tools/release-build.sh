@@ -10,7 +10,7 @@
 # never join the release-channel room. Compare any build's room with:
 #   cargo run -p onlyhumans_core --example room_id
 set -euo pipefail
-cd "$(dirname "$0")/.."
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
 
 if [ ! -f secrets/release-gk.env ]; then
   echo "secrets/release-gk.env missing — this machine is not a release machine." >&2
