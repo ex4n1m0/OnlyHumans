@@ -4,6 +4,8 @@
 import { Redis } from "@upstash/redis";
 import * as ed from "@noble/ed25519";
 
+declare const process: { env: Record<string, string | undefined> };
+
 
 function hubReady(): boolean {
   return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);

@@ -2,6 +2,8 @@
 // Clients re-verify the signature locally; the hub is untrusted storage.
 import { Redis } from "@upstash/redis";
 
+declare const process: { env: Record<string, string | undefined> };
+
 
 function hubReady(): boolean {
   return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
