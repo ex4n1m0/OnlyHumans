@@ -3,7 +3,22 @@
 // canonical payload before storing, and records expire (TTL 300s).
 // Node-style handler + plain fetch to Upstash REST (no SDK).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import * as ed from "@noble/ed25519";
+import { createPublicKey, verify as nodeVerify } from "node:crypto";
+
+// Ed25519 verify with zero dependencies: wrap the raw 32-byte public key
+// in a fixed SPKI prefix and use Node's built-in crypto.
+function ed25519Verify(sig: Uint8Array, msg: Uint8Array, rawPub: Uint8Array): boolean {
+  const spki = Buffer.alloc(44);
+  const prefix = Buffer.from("302a300506032b6570032100", "hex");
+  prefix.copy(spki, 0);
+  Buffer.from(rawPub).copy(spki, 12);
+  try {
+    const key = createPublicKey({ key: spki, format: "der", type: "spki" });
+    return nodeVerify(null, Buffer.from(msg), key, Buffer.from(sig));
+  } catch {
+    return false;
+  }
+}
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -109,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const pubRaw = libp2pEd25519Key(b64decode(pubB64));
     const sig = b64decode(sigB64);
     if (pubRaw && sig.length === 64) {
-      ok = await ed.verify(sig, canonical(peerId, pubB64, addrs, ts), pubRaw);
+      ok = ed25519Verify(sig, canonical(peerId, pubB64, addrs, ts), pubRaw);
     }
   } catch {
     ok = false;
