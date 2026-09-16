@@ -107,7 +107,15 @@ export default async function handler(req: Request): Promise<Response> {
   if (!ok) return Response.json({ error: "signature verification failed" }, { status: 403 });
 
   // Per-peer write rate limit: one registration per 30s.
-  const rl = await redis.set(`rl:${peerId}`, "1", { nx: true, ex: 30 });
+  let rl: any;
+  try {
+    rl = await redis.set(`rl:${peerId}`, "1", { nx: true, ex: 30 });
+  } catch (e: any) {
+    return Response.json(
+      { error: "redis set failed", detail: String(e && e.message ? e.message : e), stack: String(e && e.stack) },
+      { status: 500 },
+    );
+  }
   if (!rl) {
     return Response.json({ error: "rate limited" }, { status: 429 });
   }

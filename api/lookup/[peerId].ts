@@ -24,7 +24,15 @@ export default async function handler(
   if (!peerId || peerId.length > 128) {
     return Response.json({ error: "bad peer id" }, { status: 400 });
   }
-  const raw = await redis.get<string>(`peer:${peerId}`);
+  let raw: any;
+  try {
+    raw = await redis.get<string>(`peer:${peerId}`);
+  } catch (e: any) {
+    return Response.json(
+      { error: "redis get failed", detail: String(e && e.message ? e.message : e), stack: String(e && e.stack) },
+      { status: 500 },
+    );
+  }
   if (!raw) {
     return Response.json({ error: "not found" }, { status: 404 });
   }
