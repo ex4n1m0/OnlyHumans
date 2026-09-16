@@ -55,10 +55,15 @@ pub struct Contact {
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Conversation {
+    /// Wire names match the UI's expectations exactly.
+    #[serde(rename = "room")]
     pub room_id_hex: String,
+    #[serde(rename = "peer")]
     pub peer_id: String,
     /// Our role in this conversation.
+    #[serde(rename = "isHost")]
     pub is_host: bool,
+    #[serde(rename = "createdAt")]
     pub created_ts: i64,
 }
 
