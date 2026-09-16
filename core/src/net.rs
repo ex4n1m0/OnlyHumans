@@ -12,7 +12,7 @@ use crate::store::Store;
 use futures::prelude::*;
 use libp2p::request_response::{self, Codec as _, ProtocolSupport};
 use libp2p::swarm::{NetworkBehaviour, SwarmEvent};
-use libp2p::{identify, identity, multiaddr::Protocol, ping, Multiaddr, PeerId, Swarm};
+use libp2p::{dcutr, identify, multiaddr::Protocol, ping, relay, Multiaddr, PeerId, Swarm};
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::str::FromStr;
@@ -113,6 +113,11 @@ async fn write_json<T: futures::AsyncWrite + Unpin + Send>(
 pub struct Behaviour {
     identify: identify::Behaviour,
     ping: ping::Behaviour,
+    relay_client: relay::client::Behaviour,
+    /// Relay service for other peers (any reachable node offers it).
+    relay: relay::Behaviour,
+    /// Hole-punching: upgrades relayed connections to direct when possible.
+    dcutr: dcutr::Behaviour,
     rooms: request_response::Behaviour<EnvelopeCodec>,
 }
 
@@ -134,6 +139,9 @@ pub enum Command {
     Approve { peer: String, room: String },
     /// Ask a peer whether it hosts rooms for us.
     Query { peer: String },
+    /// Explicitly reserve a relay circuit; `addr` is the relay's full
+    /// address ending in /p2p/<relay_id> (tests, port-forwarded hosts).
+    ReserveWith { addr: Multiaddr },
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -162,6 +170,11 @@ pub struct NodeConfig {
     pub auto_approve: bool,
     /// Offline mode: skip hub registration entirely.
     pub offline: bool,
+    /// Offer relay service and reserve with reachable peers (default true).
+    pub relay_enabled: bool,
+    /// Force this node to accept relay reservations even without detected
+    /// external addresses (port-forwarded hosts, tests).
+    pub force_relay_hop: bool,
 }
 
 impl Default for NodeConfig {
@@ -173,6 +186,8 @@ impl Default for NodeConfig {
             listen_tcp: Some(0),
             auto_approve: false,
             offline: false,
+            relay_enabled: true,
+            force_relay_hop: false,
         }
     }
 }
@@ -194,12 +209,21 @@ pub async fn spawn(
             libp2p::yamux::Config::default,
         )?
         .with_quic()
-        .with_behaviour(|key| {
+        .with_relay_client(
+            libp2p::noise::Config::new,
+            libp2p::yamux::Config::default,
+        )?
+        .with_behaviour(|key, relay_client| {
             let identify = identify::Behaviour::new(identify::Config::new(
                 "onlyhumans/1".to_string(),
                 key.public(),
             ));
             let ping = ping::Behaviour::new(ping::Config::new());
+            let relay = relay::Behaviour::new(
+                key.public().to_peer_id(),
+                relay::Config::default(),
+            );
+            let dcutr = dcutr::Behaviour::new(key.public().to_peer_id());
             let rooms = request_response::Behaviour::with_codec(
                 EnvelopeCodec,
                 [(ROOM_PROTOCOL.to_string(), ProtocolSupport::Full)],
@@ -207,7 +231,14 @@ pub async fn spawn(
                     .with_request_timeout(Duration::from_secs(30))
                     .with_max_concurrent_streams(64),
             );
-            Behaviour { identify, ping, rooms }
+            Behaviour {
+                identify,
+                ping,
+                relay_client,
+                relay,
+                dcutr,
+                rooms,
+            }
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(600)))
         .build();
@@ -219,6 +250,12 @@ pub async fn spawn(
                 .with(Protocol::Udp(port))
                 .with(Protocol::QuicV1),
         )?;
+    }
+    if cfg.force_relay_hop {
+        swarm
+            .behaviour_mut()
+            .relay
+            .set_status(Some(relay::Status::Enable));
     }
     if let Some(port) = cfg.listen_tcp {
         swarm.listen_on(
@@ -234,6 +271,10 @@ pub async fn spawn(
     rooms.auto_approve = cfg.auto_approve;
 
     let mut known_peers: HashMap<String, PeerId> = HashMap::new();
+    /// Direct addresses of peers we can potentially reserve with.
+    let mut relay_candidates: HashMap<PeerId, Multiaddr> = HashMap::new();
+    /// Full circuit addresses from accepted reservations.
+    let mut circuit_addrs: Vec<Multiaddr> = Vec::new();
     let mut outbox: HashMap<PeerId, VecDeque<Envelope>> = HashMap::new();
     let mut connected: HashMap<PeerId, bool> = HashMap::new();
 
@@ -254,6 +295,8 @@ pub async fn spawn(
                         &mut swarm,
                         &mut rooms,
                         &store,
+                        &mut relay_candidates,
+                        &mut circuit_addrs,
                         &cmd,
                         &identity,
                         &hub,
@@ -265,7 +308,7 @@ pub async fn spawn(
                     ).await;
                 }
                 _ = hub_interval.tick(), if !cfg.offline => {
-                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub).await {
+                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs).await {
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
                 }
@@ -284,6 +327,9 @@ pub async fn spawn(
                         &store,
                         &mut outbox,
                         &mut connected,
+                        &mut relay_candidates,
+                        &mut circuit_addrs,
+                        cfg.relay_enabled,
                         &mut event_tx,
                     );
                 }
@@ -316,6 +362,7 @@ async fn register_with_hub(
     swarm: &mut Swarm<Behaviour>,
     identity: &Identity,
     hub: &HubClient,
+    circuit_addrs: &[Multiaddr],
 ) -> anyhow::Result<()> {
     let my_ip = default_route_ip();
     let mut addrs = Vec::new();
@@ -333,10 +380,17 @@ async fn register_with_hub(
         }
         addrs.push(ma.to_string());
     }
+    for c in circuit_addrs {
+        addrs.push(c.to_string());
+    }
     if addrs.is_empty() {
         anyhow::bail!("no listening addresses yet");
     }
     hub.register(identity, addrs).await
+}
+
+fn circuit_addrs_contain(list: &[Multiaddr], addr: &Multiaddr) -> bool {
+    list.iter().any(|a| a == addr)
 }
 
 fn default_route_ip() -> std::net::Ipv4Addr {
@@ -357,6 +411,8 @@ async fn handle_command(
     swarm: &mut Swarm<Behaviour>,
     rooms: &mut Rooms,
     store: &std::sync::Mutex<Store>,
+    relay_candidates: &mut HashMap<PeerId, Multiaddr>,
+    circuit_addrs: &mut Vec<Multiaddr>,
     cmd: &Command,
     identity: &Identity,
     hub: &HubClient,
@@ -434,6 +490,41 @@ async fn handle_command(
                 flush_outbox(swarm, outbox, pid);
             }
         }
+        Command::ReserveWith { addr } => {
+            if let Some(Protocol::P2p(relay_id)) = addr.iter().last() {
+                let mut base = addr.clone();
+                base.pop(); // drop /p2p/<relay>
+                try_reserve(swarm, relay_candidates, circuit_addrs, relay_id, base);
+            } else {
+                let _ = event_tx.send(NodeEvent::Log {
+                    message: "ReserveWith requires an address ending in /p2p/<relay_id>".into(),
+                });
+            }
+        }
+    }
+}
+
+/// Attempt a relay reservation with `relay_id` reachable at `base` (no /p2p suffix).
+fn try_reserve(
+    swarm: &mut Swarm<Behaviour>,
+    relay_candidates: &mut HashMap<PeerId, Multiaddr>,
+    circuit_addrs: &mut Vec<Multiaddr>,
+    relay_id: PeerId,
+    base: Multiaddr,
+) {
+    let circuit = base
+        .clone()
+        .with(Protocol::P2p(relay_id))
+        .with(Protocol::P2pCircuit);
+    // circuit_addrs doubles as the "attempted" set: a second listen_on for
+    // the same circuit aborts the first reservation's in-flight request.
+    if circuit_addrs_contain(circuit_addrs, &circuit) {
+        return;
+    }
+    circuit_addrs.push(circuit.clone());
+    relay_candidates.insert(relay_id, base);
+    if let Err(e) = swarm.listen_on(circuit.clone()) {
+        eprintln!("[onlyhumans] relay reservation not started: {e}");
     }
 }
 
@@ -452,7 +543,15 @@ async fn dial_peer(
         if let Ok(Some(reg)) = hub.lookup(&pid.to_string()).await {
             for a in &reg.addrs {
                 if let Ok(ma) = a.parse::<Multiaddr>() {
-                    let _ = swarm.dial(ma.with(Protocol::P2p(pid)));
+                    let mut ma = ma;
+                    // A peer's published circuit address is
+                    // .../p2p/<relay>/p2p-circuit; dialing THEM through it
+                    // requires appending /p2p/<target>.
+                    let is_bare_circuit = ma.iter().last() == Some(Protocol::P2pCircuit);
+                    if is_bare_circuit {
+                        ma = ma.with(Protocol::P2p(pid));
+                    }
+                    let _ = swarm.dial(ma);
                 }
             }
             let _ = identity; // signature already verified inside lookup
@@ -461,6 +560,7 @@ async fn dial_peer(
     let _ = event_tx;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn handle_swarm_event(
     swarm: &mut Swarm<Behaviour>,
     rooms: &mut Rooms,
@@ -468,10 +568,16 @@ fn handle_swarm_event(
     store: &std::sync::Mutex<Store>,
     outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
     connected: &mut HashMap<PeerId, bool>,
+    relay_candidates: &mut HashMap<PeerId, Multiaddr>,
+    circuit_addrs: &mut Vec<Multiaddr>,
+    relay_enabled: bool,
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
 ) {
     match ev {
         SwarmEvent::NewListenAddr { address, .. } => {
+            if address.iter().any(|p| matches!(p, Protocol::P2pCircuit)) {
+                eprintln!("[onlyhumans] circuit listener up: {address}");
+            }
             let _ = event_tx.send(NodeEvent::Listening { addr: address.to_string() });
         }
         SwarmEvent::ConnectionEstablished { peer_id, .. } => {
@@ -488,6 +594,25 @@ fn handle_swarm_event(
                 peer: peer_id.to_string(),
                 connected: false,
             });
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::RelayClient(relay::client::Event::ReservationReqAccepted {
+            relay_peer_id,
+            ..
+        })) => {
+            // Record the full dialable circuit address for the hub.
+            // circuit_addrs already contains the attempted circuit from
+            // try_reserve; nothing to add — just log the confirmation.
+            let _ = event_tx.send(NodeEvent::Log {
+                message: format!("relay reservation accepted via {relay_peer_id}"),
+            });
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::Relay(relay::Event::ReservationReqAccepted { src_peer_id, .. })) => {
+            let _ = event_tx.send(NodeEvent::Log {
+                message: format!("now relaying for {src_peer_id}"),
+            });
+        }
+        SwarmEvent::Behaviour(BehaviourEvent::Relay(relay::Event::ReservationReqDenied { src_peer_id, status })) => {
+            eprintln!("[onlyhumans] relay server: reservation DENIED from {src_peer_id}, status {status:?}");
         }
         SwarmEvent::Behaviour(BehaviourEvent::Rooms(rr_ev)) => match rr_ev {
             request_response::Event::Message { peer, message, .. } => {
@@ -532,10 +657,26 @@ fn handle_swarm_event(
             info,
             ..
         })) => {
-            // Learn observed addresses for future dials.
+            // Learning our own observed address is what auto-enables our
+            // relay service (HOP) once we are publicly reachable — the
+            // official relay-server pattern.
+            let observed = info.observed_addr.clone();
+            if swarm.external_addresses().all(|a| a != &observed) {
+                swarm.add_external_address(observed);
+            }
+            // Learn addresses for future dials and relay reservations.
             for ma in info.listen_addrs {
+                let usable = ma.iter().any(|p| {
+                    matches!(p, Protocol::Ip4(ip) if !ip.is_loopback() && !ip.is_unspecified())
+                });
+                if !usable {
+                    continue;
+                }
                 if !swarm.is_connected(&peer_id) {
-                    let _ = swarm.dial(ma.with(Protocol::P2p(peer_id)));
+                    let _ = swarm.dial(ma.clone().with(Protocol::P2p(peer_id)));
+                }
+                if relay_enabled {
+                    try_reserve(swarm, relay_candidates, circuit_addrs, peer_id, ma);
                 }
             }
         }
