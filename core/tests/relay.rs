@@ -21,6 +21,7 @@ async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> 
             .expect("node task died");
         let kind = match &ev {
             NodeEvent::Listening { .. } => "listening",
+            NodeEvent::InvitationReceived { .. } => "invitation",
             NodeEvent::RoomReady { .. } => "room_ready",
             NodeEvent::Message { .. } => "message",
             NodeEvent::ApprovalRequested { .. } => "approval",
@@ -140,6 +141,17 @@ async fn chat_through_peer_relay() {
     let circuit = format!("{r_addr}/p2p/{}/p2p-circuit/p2p/{}", r.peer_id, b.peer_id);
     a.cmd_tx
         .send(Command::Dial { addr: circuit.parse().unwrap() })
+        .await
+        .unwrap();
+
+    // --- B consents to the invitation, then the handshake completes ---
+    let invite = next_event(&mut b_rx, "invitation").await;
+    let (room_hex, host) = match invite {
+        NodeEvent::InvitationReceived { room, host } => (room, host),
+        other => panic!("expected invitation, got {other:?}"),
+    };
+    b.cmd_tx
+        .send(Command::AcceptInvitation { room: room_hex, host })
         .await
         .unwrap();
 

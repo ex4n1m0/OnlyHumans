@@ -60,10 +60,14 @@ pub struct RoomState {
     pub crypto: RoomCrypto,
     pub role: Role,
     pub peer: PeerId,
-    /// Our outgoing sequence number for this room.
+    /// Outgoing sequence numbers are wall-clock seeded so they survive
+    /// restarts without persistence (receiver replay guard).
     pub my_seq: u64,
     /// Highest sequence seen per sender (anti-replay).
     seen_seq: HashMap<String, u64>,
+    /// Host: this room was opened (or re-sent) at the guest's own request,
+    /// so their Join is admitted without a UI approval.
+    pub invited: bool,
 }
 
 /// Outcome of host-side admission handling.
@@ -95,6 +99,8 @@ pub enum RoomEvent {
     Message { room_id_hex: String, sender: String, body: Vec<u8>, epoch: u64 },
     /// Host-side: someone wants to join and needs UI approval.
     ApprovalRequested { room_id_hex: String, peer: PeerId },
+    /// Guest-side: someone invited us; the UI should ask for consent.
+    InvitationReceived { room_id_hex: String, host: PeerId },
     /// A key rotation was applied.
     Rotated { room_id_hex: String, new_epoch: u64 },
     ProtocolError { context: String },
@@ -124,7 +130,18 @@ impl Rooms {
     }
 
     /// Host: create a room for `peer` and produce the Invite envelope.
+    /// Reuses an existing hosted room for the same peer instead of
+    /// minting a new one on every conversation open.
     pub fn host_open_room(&mut self, peer: PeerId) -> (String, RoomEvent) {
+        if let Some(hex) = self
+            .rooms
+            .iter()
+            .find(|(_, st)| st.role == Role::Host && st.peer == peer)
+            .map(|(hex, _)| hex.clone())
+        {
+            let ev = self.invite_for(&hex);
+            return (hex, ev);
+        }
         let rc = RoomCrypto::new_host();
         let room_hex = rc.room_id_hex();
         self.rooms.insert(
@@ -133,12 +150,53 @@ impl Rooms {
                 crypto: rc,
                 role: Role::Host,
                 peer,
-                my_seq: 0,
+                my_seq: now_seed(),
                 seen_seq: HashMap::new(),
+                invited: true,
             },
         );
         let ev = self.invite_for(&room_hex);
         (room_hex, ev)
+    }
+
+    /// Rebuild a room from persisted state (startup restore).
+    pub fn restore_room(&mut self, room_hex: &str, peer: PeerId, role: Role, key: Key, epoch: u64) {
+        let room_id: RoomId = match hex::decode(room_hex).ok().and_then(|v| v.try_into().ok()) {
+            Some(r) => r,
+            None => return,
+        };
+        let mut crypto = RoomCrypto::from_delivered(room_id, key);
+        crypto.epoch = epoch.max(1);
+        self.rooms.insert(
+            room_hex.to_string(),
+            RoomState {
+                crypto,
+                role,
+                peer,
+                my_seq: now_seed(),
+                seen_seq: HashMap::new(),
+                invited: true,
+            },
+        );
+    }
+
+    /// Guest: accept a received invitation by sending our Join.
+    pub fn accept_invitation(&mut self, room_hex: &str, host: PeerId) -> Option<RoomEvent> {
+        if !self.rooms.contains_key(room_hex) {
+            return None;
+        }
+        let mut gnonce = [0u8; 16];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut gnonce);
+        let gproof = crypto::admission_proof(&self.gk, &self.my_id, &gnonce);
+        Some(RoomEvent::Send {
+            peer: host,
+            envelope: Envelope::Join {
+                room_id_hex: room_hex.to_string(),
+                guest_id: self.my_id.clone(),
+                guest_nonce_b64: crypto::base64_encode(&gnonce),
+                guest_proof_b64: crypto::base64_encode(&gproof),
+            },
+        })
     }
 
     fn invite_for(&self, room_hex: &str) -> RoomEvent {
@@ -229,29 +287,28 @@ impl Rooms {
                         return out;
                     }
                 };
-                // No key yet — a zero key placeholder is unusable for
-                // sealing/opening until KeyDelivery arrives.
-                self.rooms.insert(
-                    room_id_hex.clone(),
-                    RoomState {
-                        crypto: RoomCrypto::from_delivered(room_id, [0u8; 32]),
-                        role: Role::Guest,
-                        peer: from,
-                        my_seq: 0,
-                        seen_seq: HashMap::new(),
-                    },
-                );
-                let mut gnonce = [0u8; 16];
-                rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut gnonce);
-                let gproof = crypto::admission_proof(&self.gk, &self.my_id, &gnonce);
-                out.push(RoomEvent::Send {
-                    peer: from,
-                    envelope: Envelope::Join {
-                        room_id_hex,
-                        guest_id: self.my_id.clone(),
-                        guest_nonce_b64: crypto::base64_encode(&gnonce),
-                        guest_proof_b64: crypto::base64_encode(&gproof),
-                    },
+                // If we already have a working room with this host, treat a
+                // re-invite as a resume and ask the UI again only for new
+                // rooms. Placeholder crypto until KeyDelivery arrives.
+                let known = self.rooms.contains_key(&room_id_hex);
+                if !known {
+                    self.rooms.insert(
+                        room_id_hex.clone(),
+                        RoomState {
+                            crypto: RoomCrypto::from_delivered(room_id, [0u8; 32]),
+                            role: Role::Guest,
+                            peer: from,
+                            my_seq: now_seed(),
+                            seen_seq: HashMap::new(),
+                            invited: true,
+                        },
+                    );
+                }
+                // The INVITED side consents — the inviter already did by
+                // inviting.
+                out.push(RoomEvent::InvitationReceived {
+                    room_id_hex,
+                    host: from,
                 });
             }
             Envelope::Join {
@@ -294,7 +351,12 @@ impl Rooms {
                     out.push(err(&format!("join GK proof failed from {from}")));
                     return out;
                 }
-                let admission = if is_contact || self.auto_approve {
+                let invited = self
+                    .rooms
+                    .get(&room_id_hex)
+                    .map(|st| st.invited)
+                    .unwrap_or(false);
+                let admission = if invited || is_contact || self.auto_approve {
                     Admission::Approved
                 } else {
                     Admission::NeedsApproval
@@ -344,8 +406,9 @@ impl Rooms {
                     crypto: RoomCrypto::from_delivered(room_id, key),
                     role: Role::Guest,
                     peer: from,
-                    my_seq: 0,
+                    my_seq: now_seed(),
                     seen_seq: HashMap::new(),
+                    invited: true,
                 };
                 out.push(RoomEvent::RoomReady {
                     room_id_hex: room_id_hex.clone(),
@@ -455,6 +518,15 @@ impl Rooms {
         st.seen_seq.insert(sender.clone(), seq);
         Ok((body, epoch, sender))
     }
+}
+
+/// Wall-clock seed for outgoing sequence numbers: strictly increasing
+/// across restarts without persistence.
+fn now_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn err(context: &str) -> RoomEvent {

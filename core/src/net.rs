@@ -142,12 +142,15 @@ pub enum Command {
     /// Explicitly reserve a relay circuit; `addr` is the relay's full
     /// address ending in /p2p/<relay_id> (tests, port-forwarded hosts).
     ReserveWith { addr: Multiaddr },
+    /// Guest: accept a received invitation.
+    AcceptInvitation { room: String, host: String },
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum NodeEvent {
     Listening { addr: String },
+    InvitationReceived { room: String, host: String },
     RoomReady { room: String, peer: String, we_are_host: bool, epoch: u64 },
     Message { room: String, sender: String, body: String, epoch: u64 },
     ApprovalRequested { room: String, peer: String },
@@ -269,6 +272,23 @@ pub async fn spawn(
 
     let mut rooms = Rooms::new(crate::global_key(), identity.id_string());
     rooms.auto_approve = cfg.auto_approve;
+
+    // Restore persisted conversations so chats survive restarts.
+    if let Ok(convs) = store.conversations() {
+        for c in convs {
+            let Ok(peer) = libp2p::PeerId::from_str(&c.peer_id) else {
+                continue;
+            };
+            let role = if c.is_host {
+                crate::rooms::Role::Host
+            } else {
+                crate::rooms::Role::Guest
+            };
+            if let Ok(Some((key, epoch))) = store.room_state(&c.room_id_hex) {
+                rooms.restore_room(&c.room_id_hex, peer, role, key, epoch);
+            }
+        }
+    }
 
     let mut known_peers: HashMap<String, PeerId> = HashMap::new();
     /// Direct addresses of peers we can potentially reserve with.
@@ -496,6 +516,16 @@ async fn handle_command(
             if let Ok(pid) = PeerId::from_str(peer) {
                 enqueue(outbox, pid, Envelope::QueryRooms);
                 flush_outbox(swarm, outbox, pid);
+            }
+        }
+        Command::AcceptInvitation { room, host } => {
+            if let Ok(host_pid) = PeerId::from_str(&host) {
+                if let Some(RoomEvent::Send { peer, envelope }) =
+                    rooms.accept_invitation(&room, host_pid)
+                {
+                    enqueue(outbox, peer, envelope);
+                }
+                flush_outbox(swarm, outbox, host_pid);
             }
         }
         Command::ReserveWith { addr } => {
@@ -744,6 +774,12 @@ fn dispatch_room_event(
                 sender,
                 body: String::from_utf8_lossy(&body).into_owned(),
                 epoch,
+            });
+        }
+        RoomEvent::InvitationReceived { room_id_hex, host } => {
+            let _ = event_tx.send(NodeEvent::InvitationReceived {
+                room: room_id_hex,
+                host: host.to_string(),
             });
         }
         RoomEvent::ApprovalRequested { room_id_hex, peer } => {

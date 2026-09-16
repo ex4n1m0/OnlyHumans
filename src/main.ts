@@ -6,6 +6,7 @@ interface ChatMessage { id: number; sender: string; body: string; ts: number; ou
 interface Conversation { room: string; peer: string; isHost: boolean }
 type NodeEvent =
   | { kind: "listening"; addr: string }
+  | { kind: "invitationReceived"; room: string; host: string }
   | { kind: "roomReady"; room: string; peer: string; weAreHost: boolean; epoch: number }
   | { kind: "message"; room: string; sender: string; body: string; epoch: number }
   | { kind: "approvalRequested"; room: string; peer: string }
@@ -58,6 +59,9 @@ async function main() {
       case "approvalRequested":
         approvalToast(p.room, p.peer);
         break;
+      case "invitationReceived":
+        invitationToast(p.room, p.host);
+        break;
       case "connectionStateChanged":
         render();
         break;
@@ -82,6 +86,27 @@ async function main() {
     t.textContent = text;
     box.appendChild(t);
     setTimeout(() => t.remove(), 6000);
+  }
+
+  function invitationToast(room: string, host: string) {
+    const box = ensureToasts();
+    const t = document.createElement("div");
+    t.className = "toast";
+    t.innerHTML = `<b>${short(host)}</b> invites you to chat.`;
+    const actions = document.createElement("div");
+    actions.className = "actions";
+    const yes = document.createElement("button");
+    yes.className = "primary"; yes.textContent = "Accept";
+    const no = document.createElement("button");
+    no.className = "danger"; no.textContent = "Decline";
+    yes.onclick = async () => {
+      await invoke("accept_invitation", { room, host });
+      t.remove();
+    };
+    no.onclick = () => t.remove();
+    actions.append(yes, no);
+    t.appendChild(actions);
+    box.appendChild(t);
   }
 
   function approvalToast(room: string, peer: string) {

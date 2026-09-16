@@ -16,6 +16,7 @@ async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> 
             .expect("node task died");
         let kind = match &ev {
             NodeEvent::Listening { .. } => "listening",
+            NodeEvent::InvitationReceived { .. } => "invitation",
             NodeEvent::RoomReady { .. } => "room_ready",
             NodeEvent::Message { .. } => "message",
             NodeEvent::ApprovalRequested { .. } => "approval",
@@ -87,7 +88,17 @@ async fn two_nodes_full_room_lifecycle() {
         .await
         .unwrap();
 
-    // --- Handshake completes on both sides ---
+    // --- B consents to the invitation, then the handshake completes ---
+    let invite = next_event(&mut b_rx, "invitation").await;
+    let (room_hex, host) = match invite {
+        NodeEvent::InvitationReceived { room, host } => (room, host),
+        other => panic!("expected invitation, got {other:?}"),
+    };
+    b.cmd_tx
+        .send(Command::AcceptInvitation { room: room_hex, host })
+        .await
+        .unwrap();
+
     let a_ready = next_event(&mut a_rx, "room_ready").await;
     let b_ready = next_event(&mut b_rx, "room_ready").await;
     let room = match a_ready {

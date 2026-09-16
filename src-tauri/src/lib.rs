@@ -105,6 +105,19 @@ async fn approve_join(
 }
 
 #[tauri::command]
+async fn accept_invitation(
+    state: tauri::State<'_, AppState>,
+    room: String,
+    host: String,
+) -> Result<(), String> {
+    let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
+    node.cmd_tx
+        .send(Command::AcceptInvitation { room, host })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn add_contact(state: State<AppState>, peer: String, name: String) -> Result<(), String> {
     state
         .store
@@ -174,6 +187,7 @@ pub fn run() {
             send_message,
             rotate_key,
             approve_join,
+            accept_invitation,
             add_contact
         ])
         .run(tauri::generate_context!())
