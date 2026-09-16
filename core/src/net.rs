@@ -303,8 +303,13 @@ pub async fn spawn(
     // Track rooms we host per peer so commands can find the room hex.
     let mut hosted_for_peer: HashMap<PeerId, String> = HashMap::new();
 
+    // The interval's first tick races listener binding, so retry fast until
+    // the first successful registration, then refresh on the slow cadence.
+    let mut hub_fast = tokio::time::interval(Duration::from_secs(2));
+    hub_fast.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut hub_interval = tokio::time::interval(Duration::from_secs(120));
     hub_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut hub_registered = false;
     let mut query_interval = tokio::time::interval(Duration::from_secs(90));
 
     // rusqlite's Connection is !Sync; a std Mutex makes the task Send.
@@ -332,7 +337,22 @@ pub async fn spawn(
                         &mut event_tx,
                     ).await;
                 }
-                _ = hub_interval.tick(), if !cfg.offline => {
+                _ = hub_fast.tick(), if !cfg.offline && !hub_registered => {
+                    match register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs).await {
+                        Ok(()) => {
+                            hub_registered = true;
+                            // The slow interval's immediate first tick would
+                            // re-register within the hub's 30s per-peer
+                            // rate limit; reset pushes the next refresh a
+                            // full period out.
+                            hub_interval.reset();
+                        }
+                        Err(e) => {
+                            let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
+                        }
+                    }
+                }
+                _ = hub_interval.tick(), if !cfg.offline && hub_registered => {
                     if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs).await {
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
