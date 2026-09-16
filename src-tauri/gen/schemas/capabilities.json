@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Capabilities for the main OnlyHumans window","local":true,"windows":["main"],"permissions":["core:default","core:event:default","core:event:allow-listen","core:event:allow-emit","core:window:default"]}}
