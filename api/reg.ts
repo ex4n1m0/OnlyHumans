@@ -50,42 +50,40 @@ function libp2pEd25519Key(buf: Uint8Array): Uint8Array | null {
   let type = -1;
   let data: Uint8Array | null = null;
   while (i < buf.length) {
-    const key = buf[i++] & 0x1f;
-    let len = 0;
-    let shift = 0;
-    for (;;) {
-      const b = buf[i++];
-      len |= (b & 0x7f) << shift;
-      shift += 7;
-      if (!(b & 0x80)) break;
-    }
-    const val = buf.subarray(i, i + len);
-    i += len;
-    if (key === 1) {
-      // varint decode (protobuf integers are base-128)
+    const tag = buf[i++];
+    const fieldNum = tag >> 3;
+    const wireType = tag & 7;
+    if (wireType === 0) {
+      // varint value
       let v = 0;
       let sh = 0;
-      for (const b of val) {
+      for (;;) {
+        const b = buf[i++];
         v |= (b & 0x7f) << sh;
         sh += 7;
+        if (!(b & 0x80)) break;
       }
-      type = v;
-    } else if (key === 2) {
-      data = val;
+      if (fieldNum === 1) type = v;
+    } else if (wireType === 2) {
+      // length-delimited: varint length then payload
+      let len = 0;
+      let sh = 0;
+      for (;;) {
+        const b = buf[i++];
+        len |= (b & 0x7f) << sh;
+        sh += 7;
+        if (!(b & 0x80)) break;
+      }
+      const val = buf.subarray(i, i + len);
+      i += len;
+      if (fieldNum === 2) data = val;
+    } else {
+      return null; // unsupported wire type
     }
   }
   if (type !== 1 || !data || data.length !== 32) return null;
   return data;
 }
-
-function b64decode(s: string): Uint8Array {
-  const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-  const vals: number[] = [];
-  for (const c of s) {
-    const idx = ALPHA.indexOf(c);
-    if (idx < 0) throw new Error("bad b64 char");
-    vals.push(idx);
-  }
   const out: number[] = [];
   for (let j = 0; j < vals.length; j += 4) {
     const c = vals.slice(j, j + 4);
