@@ -1,8 +1,8 @@
 // PUT /api/reg — peers publish their current addresses.
 // The hub is untrusted storage: it verifies the Ed25519 signature over the
 // canonical payload before storing, and records expire (TTL 300s).
-// Storage is the Upstash REST API via plain fetch (no SDK: zero runtime
-// assumptions, works on any Vercel runtime).
+// Node-style handler + plain fetch to Upstash REST (no SDK).
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import * as ed from "@noble/ed25519";
 
 declare const process: { env: Record<string, string | undefined> };
@@ -14,11 +14,7 @@ function redisEnv(): { url: string; token: string } | null {
   return { url: url.replace(/\/$/, ""), token };
 }
 
-async function redisSet(
-  key: string,
-  value: string,
-  opts: { ex?: number; nx?: boolean },
-): Promise<boolean | null> {
+async function redisSet(key: string, value: string, opts: { ex?: number; nx?: boolean }) {
   const { url, token } = redisEnv()!;
   let u = `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`;
   const q: string[] = [];
@@ -28,21 +24,11 @@ async function redisSet(
   const r = await fetch(u, { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) throw new Error(`upstash set ${r.status}: ${await r.text()}`);
   const j: any = await r.json();
-  return j.result; // "OK" | null (null when NX refused)
-}
-
-async function redisGet(key: string): Promise<string | null> {
-  const { url, token } = redisEnv()!;
-  const r = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!r.ok) throw new Error(`upstash get ${r.status}: ${await r.text()}`);
-  const j: any = await r.json();
-  return j.result;
+  return j.result; // "OK" | null (NX refused)
 }
 
 // Minimal protobuf decode of a libp2p PublicKey:
-// message PublicKey { required Type type = 1; required bytes data = 2; }
+// { required Type type = 1 (varint); required bytes data = 2 }
 // Ed25519 keys are type 1 with a 32-byte payload.
 function libp2pEd25519Key(buf: Uint8Array): Uint8Array | null {
   let i = 0;
@@ -92,23 +78,17 @@ function canonical(peerId: string, pubB64: string, addrs: string[], ts: number):
   return new TextEncoder().encode(s);
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "PUT" && req.method !== "POST") {
-    return Response.json({ error: "method not allowed" }, { status: 405 });
+    res.status(405).json({ error: "method not allowed" });
+    return;
   }
-  if (!redisEnv()) {
-    return Response.json(
-      { error: "hub storage not configured (set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN)" },
-      { status: 503 },
-    );
+  const env = redisEnv();
+  if (!env) {
+    res.status(503).json({ error: "hub storage not configured" });
+    return;
   }
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return Response.json({ error: "invalid json" }, { status: 400 });
-  }
-  const { peer_id: peerId, public_key_b64: pubB64, addrs, ts_ms: ts, sig_b64: sigB64 } = body ?? {};
+  const { peer_id: peerId, public_key_b64: pubB64, addrs, ts_ms: ts, sig_b64: sigB64 } = req.body ?? {};
   if (
     typeof peerId !== "string" || peerId.length > 128 ||
     typeof pubB64 !== "string" || pubB64.length > 256 ||
@@ -116,11 +96,13 @@ export default async function handler(req: Request): Promise<Response> {
     addrs.some((a: any) => typeof a !== "string" || a.length > 256) ||
     typeof ts !== "number"
   ) {
-    return Response.json({ error: "bad payload" }, { status: 400 });
+    res.status(400).json({ error: "bad payload" });
+    return;
   }
   const now = Date.now();
   if (Math.abs(now - ts) > 60_000) {
-    return Response.json({ error: "stale timestamp" }, { status: 400 });
+    res.status(400).json({ error: "stale timestamp" });
+    return;
   }
   let ok = false;
   try {
@@ -132,20 +114,20 @@ export default async function handler(req: Request): Promise<Response> {
   } catch {
     ok = false;
   }
-  if (!ok) return Response.json({ error: "signature verification failed" }, { status: 403 });
-
+  if (!ok) {
+    res.status(403).json({ error: "signature verification failed" });
+    return;
+  }
   try {
     const rl = await redisSet(`rl:${peerId}`, "1", { ex: 30, nx: true });
     if (!rl) {
-      return Response.json({ error: "rate limited" }, { status: 429 });
+      res.status(429).json({ error: "rate limited" });
+      return;
     }
     const record = { peer_id: peerId, public_key_b64: pubB64, addrs, ts_ms: ts, sig_b64: sigB64 };
     await redisSet(`peer:${peerId}`, JSON.stringify(record), { ex: 300 });
-    return Response.json({ ok: true });
+    res.status(200).json({ ok: true });
   } catch (e: any) {
-    return Response.json(
-      { error: "redis failed", detail: String(e && e.message ? e.message : e) },
-      { status: 500 },
-    );
+    res.status(500).json({ error: "redis failed", detail: String(e?.message ?? e) });
   }
 }
