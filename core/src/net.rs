@@ -318,6 +318,14 @@ pub async fn spawn(
                         enqueue(&mut outbox, peer, Envelope::QueryRooms);
                         flush_outbox(&mut swarm, &mut outbox, peer);
                     }
+                    // Retry hub-based dials for peers with undelivered
+                    // envelopes (e.g. the peer had not registered yet when
+                    // the conversation was opened).
+                    for peer in outbox.keys().copied().collect::<Vec<_>>() {
+                        if !swarm.is_connected(&peer) {
+                            dial_peer(&mut swarm, &hub, &identity, peer, &cfg, &mut event_tx).await;
+                        }
+                    }
                 }
                 ev = swarm.select_next_some() => {
                     handle_swarm_event(

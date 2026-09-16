@@ -117,11 +117,21 @@ fn add_contact(state: State<AppState>, peer: String, name: String) -> Result<(),
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let dir = app
-                .path()
-                .app_data_dir()
-                .expect("app data dir");
+            // OH_DATA_DIR overrides the profile location so multiple
+            // instances (testing) can run with separate identities.
+            let dir = std::env::var_os("OH_DATA_DIR")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| {
+                    app.path()
+                        .app_data_dir()
+                        .expect("app data dir")
+                });
             std::fs::create_dir_all(&dir)?;
+            if let Ok(instance) = std::env::var("OH_INSTANCE") {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_title(&format!("OnlyHumans — {instance}"));
+                }
+            }
             let store = Store::open(&dir)?;
             let identity = onlyhumans_core::identity::Identity::load_or_create(&dir)?;
             let my_id = identity.id_string();
