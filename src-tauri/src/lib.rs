@@ -156,6 +156,13 @@ pub fn run() {
                 node: Mutex::new(None),
                 my_id: my_id.clone(),
             });
+            // Diagnostics for shipped builds: everything else only reaches
+            // eprintln/WebView console, which release users cannot see.
+            let log_dir = dir.join("logs");
+            append_log(
+                &log_dir,
+                &format!("=== OnlyHumans v{} starting, peer {my_id}", env!("CARGO_PKG_VERSION")),
+            );
             let cfg = NodeConfig {
                 data_dir: dir,
                 ..Default::default()
@@ -166,6 +173,7 @@ pub fn run() {
                     Ok(n) => n,
                     Err(e) => {
                         eprintln!("node failed to start: {e}");
+                        append_log(&log_dir, &format!("node failed to start: {e}"));
                         return;
                     }
                 };
@@ -173,6 +181,17 @@ pub fn run() {
                     *state.node.lock().unwrap() = Some(node);
                 }
                 while let Some(ev) = rx.recv().await {
+                    match &ev {
+                        NodeEvent::Log { message } => append_log(&log_dir, message),
+                        NodeEvent::ConnectionStateChanged { peer, connected } => append_log(
+                            &log_dir,
+                            &format!("conn {peer} {}", if *connected { "up" } else { "down" }),
+                        ),
+                        NodeEvent::Listening { addr } => {
+                            append_log(&log_dir, &format!("listening {addr}"))
+                        }
+                        _ => {}
+                    }
                     let _ = app_handle.emit("node-event", &ev);
                 }
             });
@@ -193,4 +212,24 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Append one line to `<data_dir>/logs/node.log`, rotating the previous
+/// file to node.log.old past ~1 MB. Never panics: logging is best-effort.
+fn append_log(log_dir: &std::path::Path, line: &str) {
+    use std::io::Write as _;
+    let _ = std::fs::create_dir_all(log_dir);
+    let path = log_dir.join("node.log");
+    let oversized = std::fs::metadata(&path).map(|m| m.len() > 1_000_000).unwrap_or(false);
+    if oversized {
+        let _ = std::fs::rename(&path, log_dir.join("node.log.old"));
+    }
+    let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        return;
+    };
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let _ = writeln!(f, "{ts} {line}");
 }

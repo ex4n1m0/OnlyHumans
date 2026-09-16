@@ -411,6 +411,26 @@ fn flush_outbox(swarm: &mut Swarm<Behaviour>, outbox: &mut HashMap<PeerId, VecDe
     }
 }
 
+/// Flush pending envelopes to `peer` — or, when we are not connected,
+/// start a hub-based redial immediately instead of letting them sit in
+/// the outbox until the 90 s tick. Reconnection flushes via
+/// ConnectionEstablished.
+async fn flush_or_redial(
+    swarm: &mut Swarm<Behaviour>,
+    hub: &HubClient,
+    identity: &Identity,
+    cfg: &NodeConfig,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+    outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    peer: PeerId,
+) {
+    if swarm.is_connected(&peer) {
+        flush_outbox(swarm, outbox, peer);
+    } else {
+        dial_peer(swarm, hub, identity, peer, cfg, event_tx).await;
+    }
+}
+
 async fn register_with_hub(
     swarm: &mut Swarm<Behaviour>,
     identity: &Identity,
@@ -489,7 +509,11 @@ async fn handle_command(
             if let RoomEvent::Send { peer: to, envelope } = ev {
                 enqueue(outbox, to, envelope);
             }
-            dial_peer(swarm, hub, identity, pid, cfg, event_tx).await;
+            // Not just a dial: when a connection already exists (e.g. the
+            // peers auto-connected at startup), dial_peer would early-return
+            // and the enqueued Invite would sit in the outbox until the 90 s
+            // tick. Flushing directly covers the already-connected case.
+            flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, pid).await;
         }
         Command::Dial { addr } => {
             if let Err(e) = swarm.dial(addr.clone()) {
@@ -505,7 +529,7 @@ async fn handle_command(
                         peer,
                         Envelope::Chat { frame },
                     );
-                    flush_outbox(swarm, outbox, peer);
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
                 }
             } else {
                 let _ = event_tx.send(NodeEvent::Log {
@@ -529,7 +553,7 @@ async fn handle_command(
                 if let Some(st) = rooms.room(room) {
                     let peer = st.peer;
                     enqueue(outbox, peer, Envelope::Rotate { frame });
-                    flush_outbox(swarm, outbox, peer);
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
                 }
             }
         }
@@ -540,13 +564,13 @@ async fn handle_command(
                         enqueue(outbox, to, envelope);
                     }
                 }
-                flush_outbox(swarm, outbox, pid);
+                flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, pid).await;
             }
         }
         Command::Query { peer } => {
             if let Ok(pid) = PeerId::from_str(peer) {
                 enqueue(outbox, pid, Envelope::QueryRooms);
-                flush_outbox(swarm, outbox, pid);
+                flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, pid).await;
             }
         }
         Command::AcceptInvitation { room, host } => {
@@ -556,7 +580,7 @@ async fn handle_command(
                 {
                     enqueue(outbox, peer, envelope);
                 }
-                flush_outbox(swarm, outbox, host_pid);
+                flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, host_pid).await;
             }
         }
         Command::ReserveWith { addr } => {

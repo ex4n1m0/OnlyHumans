@@ -16,6 +16,23 @@ type NodeEvent =
 
 const app = document.getElementById("app")!;
 
+// render() rewrites only #layout; the toast layer is a sibling so bursts of
+// re-renders (e.g. the connectionStateChanged storm right after a dial) can
+// never wipe a pending invitation/approval prompt.
+const layout = document.createElement("div");
+layout.id = "layout";
+app.appendChild(layout);
+
+/** Peers we currently have a libp2p connection to (per connectionStateChanged). */
+const connectedPeers = new Set<string>();
+
+function fmtTime(ts: number): string {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + time;
+}
+
 async function main() {
   const myId: string = await invoke("my_id");
   let conversations: Conversation[] = await invoke("conversations");
@@ -63,6 +80,8 @@ async function main() {
         invitationToast(p.room, p.host);
         break;
       case "connectionStateChanged":
+        if (p.connected) connectedPeers.add(p.peer);
+        else connectedPeers.delete(p.peer);
         render();
         break;
       case "log":
@@ -141,7 +160,14 @@ async function main() {
 
   function render() {
     const active = conversations.find((c) => c.room === activeRoom);
-    app.innerHTML = `
+    // A full re-render fires on every incoming message; keep whatever the
+    // user is typing (value + focus) so the composer survives it.
+    const prevSend = document.getElementById("send-text") as HTMLInputElement | null;
+    const sendState = prevSend
+      ? { value: prevSend.value, focused: document.activeElement === prevSend }
+      : null;
+    const peerValue = (document.getElementById("peer-input") as HTMLInputElement | null)?.value ?? "";
+    layout.innerHTML = `
       <header>
         <span class="logo">OnlyHumans</span>
         <span class="myid" title="click to copy — your ID">${myId}</span>
@@ -165,7 +191,7 @@ async function main() {
         ${active ? `
         <div class="chat">
           <div class="titlebar">
-            <span class="status">${short(active.peer)} · ${active.isHost ? "you host" : "peer hosts"}</span>
+            <span class="status"><i class="dot ${connectedPeers.has(active.peer) ? "on" : "off"}"></i>${short(active.peer)} · ${active.isHost ? "you host" : "peer hosts"} · ${connectedPeers.has(active.peer) ? "online" : "offline"}</span>
             <span class="epoch">key epoch ${messages.at(-1)?.epoch ?? 1}</span>
             ${active.isHost ? '<button id="rotate">Rotate key</button>' : ""}
           </div>
@@ -173,7 +199,7 @@ async function main() {
             ${messages.map((m) => `
               <div class="msg ${m.outgoing ? "out" : "in"}">
                 ${escapeHtml(m.body)}
-                <div class="meta">${m.outgoing ? "you" : short(m.sender)} · e${m.epoch}</div>
+                <div class="meta">${m.outgoing ? "you" : short(m.sender)} · ${fmtTime(m.ts)} · e${m.epoch}</div>
               </div>`).join("")}
           </div>
           <div class="composer">
@@ -184,6 +210,14 @@ async function main() {
       </main>`;
 
     (document.getElementById("msgs") as HTMLElement | null)?.scrollTo(0, 1e9);
+
+    const sendEl = document.getElementById("send-text") as HTMLInputElement | null;
+    if (sendEl && sendState) {
+      sendEl.value = sendState.value;
+      if (sendState.focused) sendEl.focus();
+    }
+    const peerEl = document.getElementById("peer-input") as HTMLInputElement | null;
+    if (peerEl && peerValue) peerEl.value = peerValue;
 
     document.getElementById("copy-id")?.addEventListener("click", () => {
       navigator.clipboard.writeText(myId);
@@ -223,6 +257,7 @@ async function main() {
       if (!input || !activeRoom) return;
       const text = input.value.trim();
       if (!text) return;
+      input.value = "";
       await invoke("send_message", { room: activeRoom, text });
       await invoke("record_message", {
         room: activeRoom, sender: myId, body: text,
