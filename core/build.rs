@@ -13,7 +13,8 @@ fn main() {
     println!("cargo:rerun-if-env-changed=OH_GLOBAL_KEY");
 
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let secrets = manifest.parent().unwrap().parent().unwrap().join("secrets");
+    // workspace root = core/.. ; secrets/ lives there
+    let secrets = manifest.parent().unwrap().join("secrets");
     std::fs::create_dir_all(&secrets).expect("create secrets dir");
     let local = secrets.join("local-gk.key");
     if !local.exists() {
