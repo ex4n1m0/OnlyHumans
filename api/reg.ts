@@ -1,16 +1,45 @@
 // PUT /api/reg — peers publish their current addresses.
 // The hub is untrusted storage: it verifies the Ed25519 signature over the
 // canonical payload before storing, and records expire (TTL 300s).
-import { Redis } from "@upstash/redis";
+// Storage is the Upstash REST API via plain fetch (no SDK: zero runtime
+// assumptions, works on any Vercel runtime).
 import * as ed from "@noble/ed25519";
 
 declare const process: { env: Record<string, string | undefined> };
 
-
-function hubReady(): boolean {
-  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+function redisEnv(): { url: string; token: string } | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  return { url: url.replace(/\/$/, ""), token };
 }
-const redis = hubReady() ? Redis.fromEnv() : null;
+
+async function redisSet(
+  key: string,
+  value: string,
+  opts: { ex?: number; nx?: boolean },
+): Promise<boolean | null> {
+  const { url, token } = redisEnv()!;
+  let u = `${url}/set/${encodeURIComponent(key)}/${encodeURIComponent(value)}`;
+  const q: string[] = [];
+  if (opts.ex !== undefined) q.push(`EX=${opts.ex}`);
+  if (opts.nx) q.push("NX");
+  if (q.length) u += `?${q.join("&")}`;
+  const r = await fetch(u, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`upstash set ${r.status}: ${await r.text()}`);
+  const j: any = await r.json();
+  return j.result; // "OK" | null (null when NX refused)
+}
+
+async function redisGet(key: string): Promise<string | null> {
+  const { url, token } = redisEnv()!;
+  const r = await fetch(`${url}/get/${encodeURIComponent(key)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!r.ok) throw new Error(`upstash get ${r.status}: ${await r.text()}`);
+  const j: any = await r.json();
+  return j.result;
+}
 
 // Minimal protobuf decode of a libp2p PublicKey:
 // message PublicKey { required Type type = 1; required bytes data = 2; }
@@ -23,7 +52,7 @@ function libp2pEd25519Key(buf: Uint8Array): Uint8Array | null {
     const key = buf[i++] & 0x1f;
     let len = 0;
     let shift = 0;
-    while (true) {
+    for (;;) {
       const b = buf[i++];
       len |= (b & 0x7f) << shift;
       shift += 7;
@@ -67,7 +96,7 @@ export default async function handler(req: Request): Promise<Response> {
   if (req.method !== "PUT" && req.method !== "POST") {
     return Response.json({ error: "method not allowed" }, { status: 405 });
   }
-  if (!redis) {
+  if (!redisEnv()) {
     return Response.json(
       { error: "hub storage not configured (set UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN)" },
       { status: 503 },
@@ -83,17 +112,16 @@ export default async function handler(req: Request): Promise<Response> {
   if (
     typeof peerId !== "string" || peerId.length > 128 ||
     typeof pubB64 !== "string" || pubB64.length > 256 ||
-    !Array.isArray(addrs) || addrs.length > 16 || addrs.some((a: any) => typeof a !== "string" || a.length > 256) ||
+    !Array.isArray(addrs) || addrs.length > 16 ||
+    addrs.some((a: any) => typeof a !== "string" || a.length > 256) ||
     typeof ts !== "number"
   ) {
     return Response.json({ error: "bad payload" }, { status: 400 });
   }
-  // Freshness: registrations older than 60s are rejected.
   const now = Date.now();
   if (Math.abs(now - ts) > 60_000) {
     return Response.json({ error: "stale timestamp" }, { status: 400 });
   }
-  // Signature over the canonical payload with the embedded libp2p key.
   let ok = false;
   try {
     const pubRaw = libp2pEd25519Key(b64decode(pubB64));
@@ -106,22 +134,18 @@ export default async function handler(req: Request): Promise<Response> {
   }
   if (!ok) return Response.json({ error: "signature verification failed" }, { status: 403 });
 
-  // Per-peer write rate limit: one registration per 30s.
-  let rl: any;
   try {
-    rl = await redis.set(`rl:${peerId}`, "1", { nx: true, ex: 30 });
+    const rl = await redisSet(`rl:${peerId}`, "1", { ex: 30, nx: true });
+    if (!rl) {
+      return Response.json({ error: "rate limited" }, { status: 429 });
+    }
+    const record = { peer_id: peerId, public_key_b64: pubB64, addrs, ts_ms: ts, sig_b64: sigB64 };
+    await redisSet(`peer:${peerId}`, JSON.stringify(record), { ex: 300 });
+    return Response.json({ ok: true });
   } catch (e: any) {
     return Response.json(
-      { error: "redis set failed", detail: String(e && e.message ? e.message : e), stack: String(e && e.stack) },
+      { error: "redis failed", detail: String(e && e.message ? e.message : e) },
       { status: 500 },
     );
   }
-  if (!rl) {
-    return Response.json({ error: "rate limited" }, { status: 429 });
-  }
-  const record = { peer_id: peerId, public_key_b64: pubB64, addrs, ts_ms: ts, sig_b64: sigB64 };
-  await redis.set(`peer:${peerId}`, JSON.stringify(record), { ex: 300 });
-  return Response.json({ ok: true });
 }
-
-export const config = { runtime: "edge" };
