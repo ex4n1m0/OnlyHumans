@@ -22,6 +22,10 @@
   footer { border-top: 1px solid #1f3038; margin-top: 3rem; padding: 1.5rem;
            text-align: center; font-size: .85rem; color: #7d95a0; }
   code { background: #0c2f37; padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+  a.dl { display: inline-block; background: var(--teal); color: #fff;
+         padding: .65rem 1.3rem; border-radius: 8px; text-decoration: none;
+         font-weight: 600; }
+  a.dl:hover { background: #0d6e79; }
 </style>
 </head>
 <body>
@@ -39,8 +43,20 @@
     any time — each new key is shared only with current participants,
     encrypted under the key in use.</p>
   </div>
+  <div class="card">
+    <h2>Download</h2>
+    <p><a class="dl" href="/download/OnlyHumans-Setup-0.1.0.exe"
+       download>OnlyHumans 0.1.0 for Windows</a> (64-bit installer, ~5&nbsp;MB).
+    Windows&nbsp;10/11 with WebView2 (included by default). Run it, copy your
+    ID from the app's header, and share it with the person you want to chat
+    with — they enter your ID (or you theirs) and one of you clicks
+    Chat.</p>
+    <p style="font-size:.9rem; color:#7d95a0;">Test build for multi-machine
+    trials. Your identity and messages never leave your device; this site
+    only ever holds signed, expiring IP addresses.</p>
+  </div>
   <h2>Status</h2>
-  <p>Early development (M2). The hub API lives at
+  <p>Early development (M3 field trials). The hub API lives at
   <code>/api/reg</code> and <code>/api/lookup/&lt;peerId&gt;</code>.</p>
   <h2>Contact</h2>
   <p>Development happens at
