@@ -1,9 +1,10 @@
 // OnlyHumans app shell: bridges the web UI to the core node + store.
 
 use onlyhumans_core::net::{spawn, Command, NodeConfig, NodeEvent, NodeHandle};
-use onlyhumans_core::store::{Conversation, StoredMessage, Store};
+use onlyhumans_core::store::{Contact, Conversation, StoredMessage, Store};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_notification::NotificationExt;
 
 struct AppState {
     store: Mutex<Store>,
@@ -127,9 +128,20 @@ fn add_contact(state: State<AppState>, peer: String, name: String) -> Result<(),
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn contacts(state: State<AppState>) -> Result<Vec<Contact>, String> {
+    state
+        .store
+        .lock()
+        .unwrap()
+        .contacts()
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             // OH_DATA_DIR overrides the profile location so multiple
             // instances (testing) can run with separate identities.
@@ -192,6 +204,35 @@ pub fn run() {
                         }
                         _ => {}
                     }
+                    // Desktop toast when the window is in the background.
+                    // Metadata only: no message content ever enters the
+                    // Windows notification history.
+                    let toast = match &ev {
+                        NodeEvent::Message { sender, .. } => {
+                            Some(format!("New message from {}", &sender[..10.min(sender.len())]))
+                        }
+                        NodeEvent::InvitationReceived { host, .. } => {
+                            Some(format!("{} invites you to chat", &host[..10.min(host.len())]))
+                        }
+                        _ => None,
+                    };
+                    if let Some(body) = toast {
+                        let unfocused = app_handle
+                            .get_webview_window("main")
+                            .map(|w| !w.is_focused().unwrap_or(true))
+                            .unwrap_or(true);
+                        if unfocused {
+                            if let Err(e) = app_handle
+                                .notification()
+                                .builder()
+                                .title("OnlyHumans")
+                                .body(body)
+                                .show()
+                            {
+                                append_log(&log_dir, &format!("notification failed: {e}"));
+                            }
+                        }
+                    }
                     let _ = app_handle.emit("node-event", &ev);
                 }
             });
@@ -201,6 +242,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             my_id,
             conversations,
+            contacts,
             messages,
             record_message,
             open_conversation,

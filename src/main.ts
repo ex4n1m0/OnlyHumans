@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 
 interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number }
 interface Conversation { room: string; peer: string; isHost: boolean }
+interface Contact { peer_id: string; name: string }
 type NodeEvent =
   | { kind: "listening"; addr: string }
   | { kind: "invitationReceived"; room: string; host: string }
@@ -36,6 +37,11 @@ function fmtTime(ts: number): string {
 async function main() {
   const myId: string = await invoke("my_id");
   let conversations: Conversation[] = await invoke("conversations");
+  const contactNames = new Map<string, string>();
+  for (const c of await invoke<Contact[]>("contacts")) contactNames.set(c.peer_id, c.name);
+  /** Saved peer name, falling back to a short id fragment. */
+  const displayName = (peer: string) => contactNames.get(peer) ?? short(peer);
+  let renamingPeer: string | null = null;
   let activeRoom: string | null = null;
   let messages: ChatMessage[] = [];
 
@@ -54,7 +60,7 @@ async function main() {
         if (p.room === activeRoom) {
           await refreshMessages();
         } else {
-          toast(`New message from ${short(p.sender)}`);
+          toast(`New message from ${displayName(p.sender)}`);
         }
         render();
         break;
@@ -111,7 +117,7 @@ async function main() {
     const box = ensureToasts();
     const t = document.createElement("div");
     t.className = "toast";
-    t.innerHTML = `<b>${short(host)}</b> invites you to chat.`;
+    t.innerHTML = `<b>${escapeHtml(displayName(host))}</b> invites you to chat.`;
     const actions = document.createElement("div");
     actions.className = "actions";
     const yes = document.createElement("button");
@@ -167,6 +173,10 @@ async function main() {
       ? { value: prevSend.value, focused: document.activeElement === prevSend }
       : null;
     const peerValue = (document.getElementById("peer-input") as HTMLInputElement | null)?.value ?? "";
+    const prevRename = document.getElementById("rename-input") as HTMLInputElement | null;
+    const renameState = prevRename
+      ? { value: prevRename.value, focused: document.activeElement === prevRename }
+      : null;
     layout.innerHTML = `
       <header>
         <span class="logo">OnlyHumans</span>
@@ -182,8 +192,8 @@ async function main() {
           <div class="hint">You start the room — you are its host.</div>
           <ul>
             ${conversations.map((c) => `
-              <li data-room="${c.room}" class="${c.room === activeRoom ? "active" : ""}">
-                <span>${short(c.peer)}</span>
+              <li data-room="${c.room}" class="${c.room === activeRoom ? "active" : ""}" title="${escapeHtml(c.peer)}">
+                <span>${escapeHtml(displayName(c.peer))}</span>
                 <span class="peer">${c.isHost ? "host" : "guest"}</span>
               </li>`).join("")}
           </ul>
@@ -191,7 +201,12 @@ async function main() {
         ${active ? `
         <div class="chat">
           <div class="titlebar">
-            <span class="status"><i class="dot ${connectedPeers.has(active.peer) ? "on" : "off"}"></i>${short(active.peer)} · ${active.isHost ? "you host" : "peer hosts"} · ${connectedPeers.has(active.peer) ? "online" : "offline"}</span>
+            ${renamingPeer === active.peer ? `
+            <input id="rename-input" value="${escapeHtml(contactNames.get(active.peer) ?? "")}" placeholder="name…" spellcheck="false">
+            <button class="primary" id="rename-save">Save</button>
+            <button id="rename-cancel">Cancel</button>` : `
+            <span class="status"><i class="dot ${connectedPeers.has(active.peer) ? "on" : "off"}"></i>${escapeHtml(displayName(active.peer))} · ${active.isHost ? "you host" : "peer hosts"} · ${connectedPeers.has(active.peer) ? "online" : "offline"}</span>
+            <button id="rename" title="Name this peer">✎ name</button>`}
             <span class="epoch">key epoch ${messages.at(-1)?.epoch ?? 1}</span>
             ${active.isHost ? '<button id="rotate">Rotate key</button>' : ""}
           </div>
@@ -199,7 +214,7 @@ async function main() {
             ${messages.map((m) => `
               <div class="msg ${m.outgoing ? "out" : "in"}">
                 ${escapeHtml(m.body)}
-                <div class="meta">${m.outgoing ? "you" : short(m.sender)} · ${fmtTime(m.ts)} · e${m.epoch}</div>
+                <div class="meta">${m.outgoing ? "you" : escapeHtml(displayName(m.sender))} · ${fmtTime(m.ts)} · e${m.epoch}</div>
               </div>`).join("")}
           </div>
           <div class="composer">
@@ -218,6 +233,11 @@ async function main() {
     }
     const peerEl = document.getElementById("peer-input") as HTMLInputElement | null;
     if (peerEl && peerValue) peerEl.value = peerValue;
+    const renameEl = document.getElementById("rename-input") as HTMLInputElement | null;
+    if (renameEl && renameState) {
+      renameEl.value = renameState.value;
+      if (renameState.focused) renameEl.focus();
+    }
 
     document.getElementById("copy-id")?.addEventListener("click", () => {
       navigator.clipboard.writeText(myId);
@@ -251,6 +271,40 @@ async function main() {
       await invoke("rotate_key", { room: activeRoom });
       toast("Key rotated — new key sent to current participants only");
     });
+
+    document.getElementById("rename")?.addEventListener("click", () => {
+      if (!active) return;
+      renamingPeer = active.peer;
+      render();
+      const input = document.getElementById("rename-input") as HTMLInputElement | null;
+      input?.focus();
+      input?.select();
+    });
+    document.getElementById("rename-save")?.addEventListener("click", saveRename);
+    document.getElementById("rename-cancel")?.addEventListener("click", () => {
+      renamingPeer = null;
+      render();
+    });
+    document.getElementById("rename-input")?.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter") void saveRename();
+      if ((e as KeyboardEvent).key === "Escape") {
+        renamingPeer = null;
+        render();
+      }
+    });
+
+    async function saveRename() {
+      const input = document.getElementById("rename-input") as HTMLInputElement | null;
+      const peer = renamingPeer;
+      if (!input || !peer) return;
+      const name = input.value.trim();
+      if (name) {
+        await invoke("add_contact", { peer, name });
+        contactNames.set(peer, name);
+      }
+      renamingPeer = null;
+      render();
+    }
 
     async function sendCurrent() {
       const input = document.getElementById("send-text") as HTMLInputElement | null;
