@@ -125,6 +125,33 @@ pub struct RotationSecret {
     pub next_key_b64: String,
 }
 
+/// Pad a payload to the next size bucket so sealed-frame lengths reveal
+/// (almost) nothing about the plaintext: [len:4][body][zeros]. An
+/// interceptor measuring ciphertext can only see which bucket a message
+/// fell into, not its actual length.
+const PAD_BUCKETS: [usize; 8] = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
+
+fn pad(body: &[u8]) -> Vec<u8> {
+    let real = 4 + body.len();
+    let target = PAD_BUCKETS
+        .iter()
+        .copied()
+        .find(|&b| b >= real)
+        .unwrap_or_else(|| real.div_ceil(16384) * 16384);
+    let mut out = Vec::with_capacity(target);
+    out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+    out.extend_from_slice(body);
+    out.resize(target, 0);
+    out
+}
+
+fn unpad(padded: &[u8]) -> anyhow::Result<&[u8]> {
+    let (len_b, rest) = padded.split_at_checked(4).ok_or_else(|| anyhow::anyhow!("short pad"))?;
+    let len = u32::from_le_bytes(len_b.try_into().unwrap()) as usize;
+    let body = rest.get(..len).ok_or_else(|| anyhow::anyhow!("pad length out of range"))?;
+    Ok(body)
+}
+
 impl RoomCrypto {
     /// Host side: create a room with a fresh random key.
     pub fn new_host() -> Self {
@@ -168,8 +195,11 @@ impl RoomCrypto {
         self.apply_rotation(secret)
     }
 
-    /// Seal an arbitrary payload under the current key (chat or rotation).
+    /// Seal an arbitrary payload under the current key (chat, rotation,
+    /// membership). The plaintext is padded to a size bucket first, so the
+    /// ciphertext length does not leak the payload length.
     pub fn seal(&self, sender: &str, seq: u64, kind: &[u8; 8], plaintext: &[u8]) -> Sealed {
+        let padded = pad(plaintext);
         let mk = self.message_key(sender, seq, kind);
         let mut nonce = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut nonce);
@@ -178,7 +208,7 @@ impl RoomCrypto {
         let ct = cipher
             .encrypt(
                 &XNonce::from(nonce),
-                Payload { msg: plaintext, aad: &aad },
+                Payload { msg: &padded, aad: &aad },
             )
             .expect("aead encrypt never fails on valid input");
         Sealed {
@@ -209,12 +239,13 @@ impl RoomCrypto {
         let ct = unbase64_vec(&frame.ct_b64)?;
         let cipher = XChaCha20Poly1305::new(AeadKey::from_slice(&mk));
         let aad = aad_bytes(kind, &self.room_id, self.epoch, &frame.sender, frame.seq);
-        cipher
+        let padded = cipher
             .decrypt(
                 &XNonce::from(nonce),
                 Payload { msg: &ct, aad: &aad },
             )
-            .map_err(|_| anyhow::anyhow!("frame failed authentication"))
+            .map_err(|_| anyhow::anyhow!("frame failed authentication"))?;
+        unpad(&padded).map(|s| s.to_vec())
     }
 
     /// Apply a rotation received from the host.
@@ -379,6 +410,34 @@ mod tests {
         let mut other = Key::default();
         other[0] = 43;
         assert!(!verify_admission_proof(&other, "peer-a", &nonce, &proof));
+    }
+
+    #[test]
+    fn padding_hides_message_lengths() {
+        let mut id = RoomId::default();
+        rand::thread_rng().fill_bytes(&mut id);
+        let rc = RoomCrypto::from_delivered(id, [7u8; 32]);
+
+        // Two very different plaintexts in the same bucket must produce
+        // identical ciphertext lengths — an interceptor measuring frames
+        // learns only the bucket, not the message size.
+        let short = rc.seal("a", 1, kinds::CHAT, b"k");
+        let long = rc.seal("a", 2, kinds::CHAT, &[0u8; 100][..]);
+        assert_eq!(short.ct_b64.len(), long.ct_b64.len());
+
+        // Cross-bucket: a 400-byte body lands in the next bucket up.
+        let big = rc.seal("a", 3, kinds::CHAT, &[0u8; 400][..]);
+        assert!(big.ct_b64.len() > long.ct_b64.len());
+
+        // Roundtrips preserve the exact body regardless of padding.
+        assert_eq!(rc.open(&short, kinds::CHAT).unwrap(), b"k");
+        assert_eq!(rc.open(&long, kinds::CHAT).unwrap(), vec![0u8; 100]);
+        assert_eq!(rc.open(&big, kinds::CHAT).unwrap(), vec![0u8; 400]);
+
+        // Tampered length prefix must not yield a body.
+        let mut tampered = pad(b"hello");
+        tampered[0] = 0xFF;
+        assert!(unpad(&tampered).is_err());
     }
 
     #[test]
