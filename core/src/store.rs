@@ -147,6 +147,18 @@ impl Store {
         Ok(rows)
     }
 
+    /// Record a peer as a contact without clobbering a user-set name.
+    pub fn add_contact_if_absent(&self, peer_id: &str) -> anyhow::Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO contacts(peer_id, name) VALUES(?1, '')
+                 ON CONFLICT(peer_id) DO NOTHING",
+                params![peer_id],
+            )
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
     pub fn is_contact(&self, peer_id: &str) -> bool {
         self.conn
             .query_row(

@@ -1,16 +1,16 @@
-// OnlyHumans UI — minimal chat client over the Rust core.
+// OnlyHumans UI — one global room. Everyone who runs the app joins the
+// same room automatically; the first ever member founded it.
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number }
-interface Conversation { room: string; peer: string; isHost: boolean }
 interface Contact { peer_id: string; name: string }
 type NodeEvent =
   | { kind: "listening"; addr: string }
-  | { kind: "invitationReceived"; room: string; host: string }
+  | { kind: "joinStatus"; status: string }
   | { kind: "roomReady"; room: string; peer: string; weAreHost: boolean; epoch: number }
   | { kind: "message"; room: string; sender: string; body: string; epoch: number }
-  | { kind: "approvalRequested"; room: string; peer: string }
+  | { kind: "membersChanged"; room: string; members: string[] }
   | { kind: "rotated"; room: string; newEpoch: number }
   | { kind: "connectionStateChanged"; peer: string; connected: boolean }
   | { kind: "log"; message: string };
@@ -18,13 +18,12 @@ type NodeEvent =
 const app = document.getElementById("app")!;
 
 // render() rewrites only #layout; the toast layer is a sibling so bursts of
-// re-renders (e.g. the connectionStateChanged storm right after a dial) can
-// never wipe a pending invitation/approval prompt.
+// re-renders can never wipe a pending prompt.
 const layout = document.createElement("div");
 layout.id = "layout";
 app.appendChild(layout);
 
-/** Peers we currently have a libp2p connection to (per connectionStateChanged). */
+/** Peers we currently have a libp2p connection to. */
 const connectedPeers = new Set<string>();
 
 function fmtTime(ts: number): string {
@@ -36,17 +35,21 @@ function fmtTime(ts: number): string {
 
 async function main() {
   const myId: string = await invoke("my_id");
-  let conversations: Conversation[] = await invoke("conversations");
   const contactNames = new Map<string, string>();
   for (const c of await invoke<Contact[]>("contacts")) contactNames.set(c.peer_id, c.name);
-  /** Saved peer name, falling back to a short id fragment. */
   const displayName = (peer: string) => contactNames.get(peer) ?? short(peer);
+
+  let room: string | null = null;
+  let isHost = false;
+  let epoch = 1;
+  let status = "connecting";
+  let hostPeer = "";
+  let members: string[] = [];
   let renamingPeer: string | null = null;
-  let activeRoom: string | null = null;
   let messages: ChatMessage[] = [];
 
   render();
-
+  await invoke("request_state").catch(() => {});
   await listen<NodeEvent>("node-event", (ev) => {
     void onNodeEvent(ev.payload);
   });
@@ -57,7 +60,8 @@ async function main() {
         await invoke("record_message", {
           room: p.room, sender: p.sender, body: p.body, epoch: p.epoch,
         });
-        if (p.room === activeRoom) {
+        if (p.room === room || room === null) {
+          room = p.room;
           await refreshMessages();
         } else {
           toast(`New message from ${displayName(p.sender)}`);
@@ -66,31 +70,41 @@ async function main() {
         break;
       }
       case "roomReady": {
-        conversations = await invoke("conversations");
-        activeRoom = p.room;
+        room = p.room;
+        isHost = p.weAreHost;
+        hostPeer = p.peer;
+        epoch = p.epoch;
+        status = p.weAreHost ? "hosting" : "connected";
         await refreshMessages();
         render();
         break;
       }
+      case "membersChanged": {
+        room = p.room;
+        members = p.members;
+        render();
+        break;
+      }
+      case "joinStatus": {
+        status = p.status;
+        render();
+        break;
+      }
       case "rotated": {
-        if (p.room === activeRoom) {
+        epoch = p.newEpoch;
+        if (p.room === room) {
           await refreshMessages();
           render();
         }
         break;
       }
-      case "approvalRequested":
-        approvalToast(p.room, p.peer);
-        break;
-      case "invitationReceived":
-        invitationToast(p.room, p.host);
-        break;
       case "connectionStateChanged":
         if (p.connected) connectedPeers.add(p.peer);
         else connectedPeers.delete(p.peer);
         render();
         break;
       case "log":
+        if (p.message.startsWith("conn ") || p.message.startsWith("hub ")) return;
         console.debug("[node]", p.message);
         break;
       case "listening":
@@ -99,10 +113,20 @@ async function main() {
   }
 
   async function refreshMessages() {
-    if (activeRoom) messages = await invoke("messages", { room: activeRoom, limit: 500 });
+    if (room) messages = await invoke("messages", { room, limit: 500 });
   }
 
   function short(peer: string) { return peer.slice(0, 10) + "…"; }
+
+  function statusLine(): string {
+    switch (status) {
+      case "hosting": return "you host the room";
+      case "connected": return `connected · ${displayName(hostPeer)} hosts`;
+      case "joining": return "joining the room…";
+      case "founding": return "creating the room (first member)…";
+      default: return "looking for the room…";
+    }
+  }
 
   function toast(text: string) {
     const box = ensureToasts();
@@ -113,51 +137,6 @@ async function main() {
     setTimeout(() => t.remove(), 6000);
   }
 
-  function invitationToast(room: string, host: string) {
-    const box = ensureToasts();
-    const t = document.createElement("div");
-    t.className = "toast";
-    t.innerHTML = `<b>${escapeHtml(displayName(host))}</b> invites you to chat.`;
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const yes = document.createElement("button");
-    yes.className = "primary"; yes.textContent = "Accept";
-    const no = document.createElement("button");
-    no.className = "danger"; no.textContent = "Decline";
-    yes.onclick = async () => {
-      await invoke("accept_invitation", { room, host });
-      t.remove();
-    };
-    no.onclick = () => t.remove();
-    actions.append(yes, no);
-    t.appendChild(actions);
-    box.appendChild(t);
-  }
-
-  function approvalToast(room: string, peer: string) {
-    const box = ensureToasts();
-    const t = document.createElement("div");
-    t.className = "toast";
-    t.innerHTML = `<b>${short(peer)}</b> wants to join a room.`;
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const yes = document.createElement("button");
-    yes.className = "primary"; yes.textContent = "Admit";
-    const no = document.createElement("button");
-    no.className = "danger"; no.textContent = "Decline";
-    yes.onclick = async () => {
-      await invoke("approve_join", { peer, room, allow: true });
-      t.remove();
-    };
-    no.onclick = async () => {
-      await invoke("approve_join", { peer, room, allow: false });
-      t.remove();
-    };
-    actions.append(yes, no);
-    t.appendChild(actions);
-    box.appendChild(t);
-  }
-
   function ensureToasts(): HTMLElement {
     let box = document.querySelector<HTMLElement>(".toasts");
     if (!box) { box = document.createElement("div"); box.className = "toasts"; app.appendChild(box); }
@@ -165,14 +144,13 @@ async function main() {
   }
 
   function render() {
-    const active = conversations.find((c) => c.room === activeRoom);
+    const ready = room !== null;
     // A full re-render fires on every incoming message; keep whatever the
     // user is typing (value + focus) so the composer survives it.
     const prevSend = document.getElementById("send-text") as HTMLInputElement | null;
     const sendState = prevSend
       ? { value: prevSend.value, focused: document.activeElement === prevSend }
       : null;
-    const peerValue = (document.getElementById("peer-input") as HTMLInputElement | null)?.value ?? "";
     const prevRename = document.getElementById("rename-input") as HTMLInputElement | null;
     const renameState = prevRename
       ? { value: prevRename.value, focused: document.activeElement === prevRename }
@@ -185,30 +163,24 @@ async function main() {
       </header>
       <main>
         <div class="sidebar">
-          <div class="newchat">
-            <input id="peer-input" placeholder="peer id…" spellcheck="false">
-            <button class="primary" id="open-chat">Chat</button>
+          <div class="roominfo">
+            <div class="status">${statusLine()}</div>
+            <div class="members-n">${members.length || (ready ? 1 : 0)} member${(members.length || 1) === 1 ? "" : "s"}</div>
           </div>
-          <div class="hint">You start the room — you are its host.</div>
           <ul>
-            ${conversations.map((c) => `
-              <li data-room="${c.room}" class="${c.room === activeRoom ? "active" : ""}" title="${escapeHtml(c.peer)}">
-                <span>${escapeHtml(displayName(c.peer))}</span>
-                <span class="peer">${c.isHost ? "host" : "guest"}</span>
+            ${members.map((m) => `
+              <li data-peer="${m}" class="${m === hostPeer ? "ishost" : ""}" title="${m}">
+                <i class="dot ${m === myId || connectedPeers.has(m) ? "on" : "off"}"></i>
+                <span>${m === myId ? "you" : escapeHtml(displayName(m))}</span>
+                ${m === hostPeer ? '<span class="peer">host</span>' : ""}
               </li>`).join("")}
           </ul>
         </div>
-        ${active ? `
+        ${ready ? `
         <div class="chat">
           <div class="titlebar">
-            ${renamingPeer === active.peer ? `
-            <input id="rename-input" value="${escapeHtml(contactNames.get(active.peer) ?? "")}" placeholder="name…" spellcheck="false">
-            <button class="primary" id="rename-save">Save</button>
-            <button id="rename-cancel">Cancel</button>` : `
-            <span class="status"><i class="dot ${connectedPeers.has(active.peer) ? "on" : "off"}"></i>${escapeHtml(displayName(active.peer))} · ${active.isHost ? "you host" : "peer hosts"} · ${connectedPeers.has(active.peer) ? "online" : "offline"}</span>
-            <button id="rename" title="Name this peer">✎ name</button>`}
-            <span class="epoch">key epoch ${messages.at(-1)?.epoch ?? 1}</span>
-            ${active.isHost ? '<button id="rotate">Rotate key</button>' : ""}
+            <span class="status">${statusLine()} · key epoch ${epoch}</span>
+            ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
           </div>
           <div class="messages" id="msgs">
             ${messages.map((m) => `
@@ -218,10 +190,10 @@ async function main() {
               </div>`).join("")}
           </div>
           <div class="composer">
-            <input id="send-text" placeholder="message…" autocomplete="off">
+            <input id="send-text" placeholder="message the room…" autocomplete="off" ${ready ? "" : "disabled"}>
             <button class="primary" id="send">Send</button>
           </div>
-        </div>` : `<div class="empty">Open a chat with someone's ID,<br>or wait for an invitation.</div>`}
+        </div>` : `<div class="empty">${statusLine()}<br>The room key is shared with everyone holding the community key.</div>`}
       </main>`;
 
     (document.getElementById("msgs") as HTMLElement | null)?.scrollTo(0, 1e9);
@@ -231,8 +203,6 @@ async function main() {
       sendEl.value = sendState.value;
       if (sendState.focused) sendEl.focus();
     }
-    const peerEl = document.getElementById("peer-input") as HTMLInputElement | null;
-    if (peerEl && peerValue) peerEl.value = peerValue;
     const renameEl = document.getElementById("rename-input") as HTMLInputElement | null;
     if (renameEl && renameState) {
       renameEl.value = renameState.value;
@@ -247,75 +217,73 @@ async function main() {
       navigator.clipboard.writeText(myId);
       toast("ID copied");
     });
-    document.getElementById("open-chat")?.addEventListener("click", async () => {
-      const input = document.getElementById("peer-input") as HTMLInputElement;
-      const peer = input.value.trim();
-      if (!peer) return;
-      await invoke("open_conversation", { peer });
-      toast("Inviting…");
-      input.value = "";
-    });
+
+    // Member rows: click to rename (adds a contact name).
     document.querySelectorAll<HTMLElement>(".sidebar li").forEach((li) => {
-      li.addEventListener("click", async () => {
-        activeRoom = li.dataset.room!;
-        await refreshMessages();
+      li.addEventListener("click", () => {
+        const peer = li.dataset.peer!;
+        if (peer === myId) return;
+        renamingPeer = peer;
         render();
       });
     });
+    if (renamingPeer) {
+      // Renaming overlay lives in the toast layer (outside #layout).
+      const box = ensureToasts();
+      const t = document.createElement("div");
+      t.className = "toast";
+      t.innerHTML = `<b>Name for ${escapeHtml(short(renamingPeer))}</b>`;
+      const row = document.createElement("div");
+      row.className = "actions";
+      const input = document.createElement("input");
+      input.id = "rename-input";
+      input.value = contactNames.get(renamingPeer) ?? "";
+      input.placeholder = "name…";
+      const save = document.createElement("button");
+      save.className = "primary"; save.textContent = "Save";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      row.append(input, save, cancel);
+      t.appendChild(row);
+      box.appendChild(t);
+      input.focus();
+      const done = async () => {
+        const name = input.value.trim();
+        if (name && renamingPeer) {
+          await invoke("add_contact", { peer: renamingPeer, name });
+          contactNames.set(renamingPeer, name);
+        }
+        renamingPeer = null;
+        t.remove();
+        render();
+      };
+      save.onclick = () => void done();
+      cancel.onclick = () => { renamingPeer = null; t.remove(); };
+      input.addEventListener("keydown", (e) => {
+        if ((e as KeyboardEvent).key === "Enter") void done();
+        if ((e as KeyboardEvent).key === "Escape") { renamingPeer = null; t.remove(); }
+      });
+    }
+
     document.getElementById("send")?.addEventListener("click", sendCurrent);
     document.getElementById("send-text")?.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") sendCurrent();
     });
     document.getElementById("rotate")?.addEventListener("click", async () => {
-      if (!activeRoom) return;
-      await invoke("rotate_key", { room: activeRoom });
-      toast("Key rotated — new key sent to current participants only");
+      await invoke("rotate_key");
+      toast("Key rotated — new key sent to current members only");
     });
-
-    document.getElementById("rename")?.addEventListener("click", () => {
-      if (!active) return;
-      renamingPeer = active.peer;
-      render();
-      const input = document.getElementById("rename-input") as HTMLInputElement | null;
-      input?.focus();
-      input?.select();
-    });
-    document.getElementById("rename-save")?.addEventListener("click", saveRename);
-    document.getElementById("rename-cancel")?.addEventListener("click", () => {
-      renamingPeer = null;
-      render();
-    });
-    document.getElementById("rename-input")?.addEventListener("keydown", (e) => {
-      if ((e as KeyboardEvent).key === "Enter") void saveRename();
-      if ((e as KeyboardEvent).key === "Escape") {
-        renamingPeer = null;
-        render();
-      }
-    });
-
-    async function saveRename() {
-      const input = document.getElementById("rename-input") as HTMLInputElement | null;
-      const peer = renamingPeer;
-      if (!input || !peer) return;
-      const name = input.value.trim();
-      if (name) {
-        await invoke("add_contact", { peer, name });
-        contactNames.set(peer, name);
-      }
-      renamingPeer = null;
-      render();
-    }
 
     async function sendCurrent() {
       const input = document.getElementById("send-text") as HTMLInputElement | null;
-      if (!input || !activeRoom) return;
+      if (!input || !room) return;
       const text = input.value.trim();
       if (!text) return;
       input.value = "";
-      await invoke("send_message", { room: activeRoom, text });
+      await invoke("send_message", { text });
       await invoke("record_message", {
-        room: activeRoom, sender: myId, body: text,
-        epoch: messages.at(-1)?.epoch ?? 1, outgoing: true,
+        room, sender: myId, body: text,
+        epoch, outgoing: true,
       });
       await refreshMessages();
       render();

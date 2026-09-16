@@ -55,65 +55,28 @@ fn record_message(
 }
 
 #[tauri::command]
-async fn open_conversation(
-    state: tauri::State<'_, AppState>,
-    peer: String,
-) -> Result<(), String> {
-    let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
-    node.cmd_tx
-        .send(Command::OpenConversation { peer })
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 async fn send_message(
     state: tauri::State<'_, AppState>,
-    room: String,
     text: String,
 ) -> Result<(), String> {
     let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
     node.cmd_tx
-        .send(Command::SendMessage { room, text })
+        .send(Command::SendMessage { text })
         .await
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn rotate_key(state: tauri::State<'_, AppState>, room: String) -> Result<(), String> {
+async fn rotate_key(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
-    node.cmd_tx
-        .send(Command::Rotate { room })
-        .await
-        .map_err(|e| e.to_string())
+    node.cmd_tx.send(Command::Rotate).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn approve_join(
-    state: tauri::State<'_, AppState>,
-    peer: String,
-    room: String,
-    allow: bool,
-) -> Result<(), String> {
-    if !allow {
-        return Ok(()); // declining leaves the join unanswered
-    }
+async fn request_state(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
     node.cmd_tx
-        .send(Command::Approve { peer, room })
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn accept_invitation(
-    state: tauri::State<'_, AppState>,
-    room: String,
-    host: String,
-) -> Result<(), String> {
-    let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
-    node.cmd_tx
-        .send(Command::AcceptInvitation { room, host })
+        .send(Command::RequestState)
         .await
         .map_err(|e| e.to_string())
 }
@@ -211,9 +174,6 @@ pub fn run() {
                         NodeEvent::Message { sender, .. } => {
                             Some(format!("New message from {}", &sender[..10.min(sender.len())]))
                         }
-                        NodeEvent::InvitationReceived { host, .. } => {
-                            Some(format!("{} invites you to chat", &host[..10.min(host.len())]))
-                        }
                         _ => None,
                     };
                     if let Some(body) = toast {
@@ -245,11 +205,9 @@ pub fn run() {
             contacts,
             messages,
             record_message,
-            open_conversation,
             send_message,
             rotate_key,
-            approve_join,
-            accept_invitation,
+            request_state,
             add_contact
         ])
         .run(tauri::generate_context!())

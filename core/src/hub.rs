@@ -15,6 +15,31 @@ pub struct Registration {
     pub sig_b64: String,
 }
 
+/// Who currently hosts a room: a signed, TTL-scoped pointer so joiners can
+/// find the host through the hub. First writer wins (the endpoint stores
+/// with NX), which is the room-creation election.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoomHostRecord {
+    pub room_id: String,
+    pub host_peer_id: String,
+    pub host_public_key_b64: String,
+    pub ts_ms: u64,
+    pub sig_b64: String,
+}
+
+fn room_canonical(room_id: &str, host: &str, pub_b64: &str, ts_ms: u64) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(b"OH1-room|");
+    v.extend_from_slice(room_id.as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(host.as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(pub_b64.as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(ts_ms.to_string().as_bytes());
+    v
+}
+
 /// Canonical bytes that get signed for registration.
 fn canonical(peer_id: &str, pub_b64: &str, addrs: &[String], ts_ms: u64) -> Vec<u8> {
     let mut v = Vec::new();
@@ -96,6 +121,60 @@ impl HubClient {
             anyhow::bail!("hub record failed signature verification");
         }
         Ok(Some(reg))
+    }
+
+    /// Publish ourselves as the host of `room_id`. Returns false when the
+    /// record already exists (someone else hosts — first-writer-wins
+    /// election lost, so join them instead).
+    pub async fn register_room(&self, id: &Identity, room_id: &str) -> anyhow::Result<bool> {
+        let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let pub_b64 = crate::crypto::base64_encode(&id.public_key_bytes());
+        let canon = room_canonical(room_id, &id.id_string(), &pub_b64, ts_ms);
+        let sig = id.sign(&canon)?;
+        let rec = RoomHostRecord {
+            room_id: room_id.to_string(),
+            host_peer_id: id.id_string(),
+            host_public_key_b64: pub_b64,
+            ts_ms,
+            sig_b64: crate::crypto::base64_encode(&sig),
+        };
+        let resp = self
+            .http
+            .put(format!("{}/api/room", self.base))
+            .json(&rec)
+            .send()
+            .await?;
+        match resp.status() {
+            s if s.is_success() => Ok(true),
+            reqwest::StatusCode::CONFLICT => Ok(false),
+            s => anyhow::bail!("room register failed: {} {}", s, resp.text().await.unwrap_or_default()),
+        }
+    }
+
+    /// Fetch (and verify) the current host record of a room.
+    pub async fn lookup_room(&self, room_id: &str) -> anyhow::Result<Option<RoomHostRecord>> {
+        let resp = self
+            .http
+            .get(format!("{}/api/room/{room_id}", self.base))
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !resp.status().is_success() {
+            anyhow::bail!("room lookup failed: {}", resp.status());
+        }
+        let rec: RoomHostRecord = resp.json().await?;
+        let pub_bytes = crate::crypto::base64_decode(&rec.host_public_key_b64)?;
+        let sig = crate::crypto::base64_decode(&rec.sig_b64)?;
+        let canon = room_canonical(&rec.room_id, &rec.host_peer_id, &rec.host_public_key_b64, rec.ts_ms);
+        if rec.room_id != room_id {
+            anyhow::bail!("hub returned a different room id than requested");
+        }
+        if !Identity::verify(&pub_bytes, &canon, &sig) {
+            anyhow::bail!("room record failed signature verification");
+        }
+        Ok(Some(rec))
     }
 }
 

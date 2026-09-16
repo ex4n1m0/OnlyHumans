@@ -353,6 +353,7 @@ fn unbase64<const N: usize>(s: &str) -> anyhow::Result<[u8; N]> {
 pub mod kinds {
     pub const CHAT: &[u8; 8] = b"chat\0\0\0\0";
     pub const ROTATE: &[u8; 8] = b"rotate\0\0";
+    pub const MEMBERS: &[u8; 8] = b"members\0";
 }
 
 #[cfg(test)]
