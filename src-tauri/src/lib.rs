@@ -121,13 +121,29 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String) 
                     .map(|w| !w.is_focused().unwrap_or(true))
                     .unwrap_or(true);
                 if unfocused {
-                    if let Err(e) = app_handle
+                    // Fire via notify-rust directly: the plugin skips the
+                    // app id for exes under target/, which attributes the
+                    // toast to PowerShell. Our registry AUMID entry makes
+                    // this id resolve to "OnlyHumans".
+                    #[cfg(windows)]
+                    let shown = (|| -> Result<(), notify_rust::error::Error> {
+                        let mut n = notify_rust::Notification::new();
+                        n.app_id("space.deepflux.onlyhumans");
+                        n.summary("OnlyHumans").body(&body).show()?;
+                        Ok(())
+                    })();
+                    #[cfg(not(windows))]
+                    let shown = app_handle
                         .notification()
                         .builder()
                         .title("OnlyHumans")
                         .body(body)
                         .show()
-                    {
+                        .map(|_| ())
+                        .map_err(|e| {
+                            let _ = e;
+                        });
+                    if let Err(e) = shown {
                         append_log(&log_dir, &format!("notification failed: {e}"));
                     }
                 }
