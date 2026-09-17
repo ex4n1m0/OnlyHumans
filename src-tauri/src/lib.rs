@@ -94,9 +94,19 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String) 
         if let Some(state) = app_handle.try_state::<AppState>() {
             *state.node.lock().unwrap() = Some(node);
         }
+        // peer -> display name, for toast formatting (the shell otherwise
+        // only sees raw peer ids)
+        let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         while let Some(ev) = rx.recv().await {
             match &ev {
                 NodeEvent::Log { message } => append_log(&log_dir, message),
+                NodeEvent::MembersChanged { members, .. } => {
+                    for m in members {
+                        if !m.name.is_empty() {
+                            names.insert(m.peer.clone(), m.name.clone());
+                        }
+                    }
+                }
                 NodeEvent::ConnectionStateChanged { peer, connected } => append_log(
                     &log_dir,
                     &format!("conn {peer} {}", if *connected { "up" } else { "down" }),
@@ -111,7 +121,12 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String) 
             // Windows notification history.
             let toast = match &ev {
                 NodeEvent::Message { sender, .. } => {
-                    Some(format!("New message from {}", &sender[..10.min(sender.len())]))
+                    let who = names.get(sender).cloned()
+                        .unwrap_or_else(|| sender.chars().take(10).collect());
+                    Some(format!("New message from {who}"))
+                }
+                NodeEvent::Rotated { new_epoch, .. } => {
+                    Some(format!("Room key rotated — now on epoch {new_epoch}"))
                 }
                 _ => None,
             };
