@@ -243,6 +243,58 @@ fn contacts(state: State<AppState>) -> Result<Vec<Contact>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Give Windows a proper identity for our toasts so they are attributed
+/// to OnlyHumans instead of falling back to PowerShell. Uses the
+/// documented registry form of AppUserModelID registration (no COM, no
+/// Start Menu shortcut): HKCU\Software\Classes\AppUserModelId\<id>
+/// with DisplayName + IconUri.
+#[cfg(windows)]
+fn register_toast_identity(icon_png: &std::path::Path) {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyExW, RegSetValueW, HKEY, HKEY_CURRENT_USER,
+        KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ,
+    };
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    const AUMID: &str = "space.deepflux.onlyhumans";
+    let aumid_w: Vec<u16> = AUMID.encode_utf16().chain([0]).collect();
+    unsafe {
+        let _ = SetCurrentProcessExplicitAppUserModelID(aumid_w.as_ptr());
+
+        let subkey: Vec<u16> = format!("Software\\Classes\\AppUserModelId\\{AUMID}")
+            .encode_utf16()
+            .chain([0])
+            .collect();
+        let mut hkey: HKEY = 0;
+        if RegCreateKeyExW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            0,
+            std::ptr::null(),
+            REG_OPTION_NON_VOLATILE,
+            KEY_SET_VALUE,
+            std::ptr::null(),
+            &mut hkey,
+            std::ptr::null_mut(),
+        ) != 0
+        {
+            return;
+        }
+        let mut set = |name: &str, value: &str| {
+            let name_w: Vec<u16> = name.encode_utf16().chain([0]).collect();
+            let val_w: Vec<u16> = value.encode_utf16().chain([0]).collect();
+            let bytes = (val_w.len() * 2) as u32;
+            RegSetValueW(hkey, name_w.as_ptr(), REG_SZ, val_w.as_ptr(), bytes);
+        };
+        set("DisplayName", "OnlyHumans");
+        if let Some(icon) = icon_png.to_str() {
+            let uri = format!("file:///{}", icon.replace('\\', "/"));
+            set("IconUri", &uri);
+        }
+        RegCloseKey(hkey);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -258,6 +310,33 @@ pub fn run() {
                         .expect("app data dir")
                 });
             std::fs::create_dir_all(&dir)?;
+            #[cfg(windows)]
+            {
+                // Icon for toast attribution, placed in the data dir.
+                let icon_dst = dir.join("icon-256.png");
+                if !icon_dst.exists() {
+                    let icon_src = std::env::current_exe()
+                        .ok()
+                        .and_then(|e| e.parent().map(|p| p.join("icon-256.png")))
+                        .filter(|p| p.exists())
+                        .or_else(|| {
+                            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                                .join("icons")
+                                .join("icon.png")
+                                .exists()
+                                .then(|| {
+                                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                                        .join("icons")
+                                        .join("icon.png")
+                                })
+                        });
+                    if let Some(src) = icon_src {
+                        let _ = std::fs::copy(src, &icon_dst);
+                    }
+                }
+                register_toast_identity(&icon_dst);
+            }
+
             if let Ok(instance) = std::env::var("OH_INSTANCE") {
                 if let Some(win) = app.get_webview_window("main") {
                     let _ = win.set_title(&format!("OnlyHumans — {instance}"));
