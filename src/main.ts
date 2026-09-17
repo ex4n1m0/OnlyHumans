@@ -28,6 +28,25 @@ app.appendChild(layout);
 /** Peers we currently have a libp2p connection to. */
 const connectedPeers = new Set<string>();
 
+/** Stable hue from a peer id — colors avatars and sender labels. */
+function peerHue(peer: string): number {
+  let h = 0;
+  for (let i = 0; i < peer.length; i++) h = (h * 31 + peer.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
+
+/** Round avatar: initials for people, a mesh glyph for the main room. */
+function avatarHtml(peer: string, label: string): string {
+  const hue = peerHue(peer);
+  const initials = (label.replace(/\s+/g, "").slice(0, 2) || "?").toUpperCase();
+  return `<span class="avatar" style="background:hsl(${hue} 40% 28%);color:hsl(${hue} 70% 75%)">${escapeHtml(initials)}</span>`;
+}
+
+const MAIN_ROOM_ICON = `<span class="avatar roomavatar">
+  <svg viewBox="0 0 24 24" fill="none"><circle cx="6" cy="7" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18" cy="8.6" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="17.4" r="2.4" stroke="currentColor" stroke-width="1.6"/><path d="M8.1 7.9 15.9 8.3 M7.3 9 10.6 15.3 M17 10.3 13.9 15.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+</span>`;
+
 function fmtTime(ts: number): string {
   const d = new Date(ts);
   const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -268,59 +287,45 @@ async function boot() {
         <div class="sidebar">
           <div class="roominfo">
             <div class="status">${statusLine()}</div>
-            <div class="members-n">${members.length || (ready ? 1 : 0)} member${(members.length || 1) === 1 ? "" : "s"}</div>
           </div>
-          <div class="side-label">rooms</div>
-          <ul>
-            ${ready ? `
-            <li data-room="${room}" class="roomrow ${activeRoom === room ? "active" : ""}">
-              <i class="dot ${isHost || connectedPeers.size > 0 ? "on" : "off"}"></i>
-              <span>main room</span>
-              <span class="peer">${members.length || 1}</span>
-            </li>` : ""}
-          </ul>
-          ${dms.size ? `
-          <div class="side-label plabel">private</div>
-          <ul>
-            ${[...dms.entries()].map(([hex, dm]) => `
-              <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${dm.peer}">
-                <i class="dot ${connectedPeers.has(dm.peer) ? "on" : "off"}"></i>
-                <span class="mname">${escapeHtml(displayName(dm.peer))}</span>
-              </li>`).join("")}
-          </ul>` : ""}
-          <div class="side-label">members</div>
-          <ul>
-            ${members.filter((m) => m.peer !== myId).map((m) => `
-              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="${m.peer}">
-                <i class="dot ${connectedPeers.has(m.peer) ? "on" : "off"}"></i>
-                <span class="mname" data-peer="${m.peer}">${escapeHtml(memberLabel(m))}</span>
-                ${m.peer === hostPeer ? '<span class="peer">host</span>' : ""}
-                <button class="rename-btn" data-peer="${m.peer}" title="private room + double-click to rename">✎</button>
-              </li>`).join("")}
-          </ul>
-        </div>
-        ${ready ? `
+          <div class="side-label">the room</div>
+          ${ready ? `
         <div class="chat ${activeRoom === room ? "" : "dm"}">
           <div class="titlebar">
             ${activeRoom === room
-              ? `<span class="status">${statusLine()} · key epoch ${epoch}</span>
-                 ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
-                 <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
-                   ${clearArmed ? "Really clear for everyone?" : "Clear history"}
-                 </button>`
+              ? `${MAIN_ROOM_ICON}
+                 <div class="tb-body">
+                   <div class="tb-title">Main Room <span class="pub-pill">public</span></div>
+                   <div class="tb-sub">${statusLine()} · key epoch ${epoch}</div>
+                 </div>
+                 <div class="tb-actions">
+                   ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
+                   <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
+                     ${clearArmed ? "Really clear?" : "Clear history"}
+                   </button>
+                 </div>`
               : (() => {
                   const dm = dms.get(activeRoom ?? "");
                   const peer = dm?.peer ?? "";
                   const on = connectedPeers.has(peer);
-                  return `<span class="status"><i class="dot ${on ? "on" : "off"}"></i>${escapeHtml(displayName(peer))}</span><span class="pp-pill">private</span>`;
+                  const name = displayName(peer);
+                  return `${avatarHtml(peer, name)}
+                    <div class="tb-body">
+                      <div class="tb-title">${escapeHtml(name)} <span class="pp-pill">private</span></div>
+                      <div class="tb-sub"><i class="dot ${on ? "on" : "off"}"></i>${on ? "online" : "offline"} · vanishes when you both leave</div>
+                    </div>`;
                 })()}
           </div>
           <div class="messages" id="msgs">
-            ${(activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? [])).map((m) => `
+            ${(activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? [])).map((m) => {
+              const showSender = activeRoom === room && !m.outgoing;
+              const hue = peerHue(m.sender);
+              return `
+              ${showSender ? `<div class="sender" style="color:hsl(${hue} 65% 70%)">${escapeHtml(displayName(m.sender))}</div>` : ""}
               <div class="msg ${m.outgoing ? "out" : "in"}">
                 ${escapeHtml(m.body)}
-                <div class="meta">${m.outgoing ? "you" : escapeHtml(displayName(m.sender))} · ${fmtTime(m.ts)}${activeRoom === room ? ` · e${m.epoch}` : ""}${m.pending && offlineTargets().length ? ' · <span class="pend">⏱ waiting</span>' : ""}</div>
-              </div>`).join("")}
+                <div class="meta">${fmtTime(m.ts)}${activeRoom === room ? ` · e${m.epoch}` : ""}${m.pending && offlineTargets().length ? ' · <span class="pend">waiting</span>' : ""}</div>
+              </div>`;}).join("")}
           </div>
           ${offlineTargets().length ? `
           <div class="pending-strip">
@@ -328,7 +333,7 @@ async function boot() {
             — messages will be delivered when they return (while you stay online)
           </div>` : ""}
           <div class="composer">
-            <input id="send-text" placeholder="message the room…" autocomplete="off" ${ready ? "" : "disabled"}>
+            <input id="send-text" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" autocomplete="off" ${ready ? "" : "disabled"}>
             <button class="primary" id="send">Send</button>
           </div>
         </div>` : `<div class="empty">${statusLine()}<br>The room key is shared with everyone holding the community key.</div>`}
@@ -348,7 +353,7 @@ async function boot() {
     }
 
     // Room switcher: the pinned main-room row.
-    document.querySelector<HTMLElement>(".sidebar li.roomrow")?.addEventListener("click", async () => {
+    document.querySelector<HTMLElement>(".sidebar .roomcard")?.addEventListener("click", async () => {
       if (!room) return;
       activeRoom = room;
       await refreshMessages();
@@ -471,6 +476,7 @@ async function boot() {
     }
   }
 }
+
 
 function escapeHtml(s: string): string {
   return s.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
