@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number }
+interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number; pending?: boolean }
 interface Contact { peer_id: string; name: string }
 interface MemberInfo { peer: string; name: string }
 type NodeEvent =
@@ -212,6 +212,17 @@ async function boot() {
     return null;
   }
 
+  /** Offline targets for the active room (message stays undelivered). */
+  function offlineTargets(): string[] {
+    if (activeRoom === room) {
+      return members.filter((m) => m.peer !== myId && !connectedPeers.has(m.peer))
+        .map((m) => contactNames.get(m.peer) || m.name || m.peer.slice(0, 8));
+    }
+    const dm = dms.get(activeRoom ?? "");
+    if (!dm) return [];
+    return connectedPeers.has(dm.peer) ? [] : [displayName(dm.peer)];
+  }
+
   function statusLine(): string {
     switch (status) {
       case "hosting": return "you host the room";
@@ -308,9 +319,14 @@ async function boot() {
             ${(activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? [])).map((m) => `
               <div class="msg ${m.outgoing ? "out" : "in"}">
                 ${escapeHtml(m.body)}
-                <div class="meta">${m.outgoing ? "you" : escapeHtml(displayName(m.sender))} · ${fmtTime(m.ts)}${activeRoom === room ? ` · e${m.epoch}` : ""}</div>
+                <div class="meta">${m.outgoing ? "you" : escapeHtml(displayName(m.sender))} · ${fmtTime(m.ts)}${activeRoom === room ? ` · e${m.epoch}` : ""}${m.pending && offlineTargets().length ? ' · <span class="pend">⏱ waiting</span>' : ""}</div>
               </div>`).join("")}
           </div>
+          ${offlineTargets().length ? `
+          <div class="pending-strip">
+            ⏱ ${offlineTargets().length === 1 ? escapeHtml(offlineTargets()[0]) + " is offline" : offlineTargets().length + " members are offline"}
+            — messages will be delivered when they return (while you stay online)
+          </div>` : ""}
           <div class="composer">
             <input id="send-text" placeholder="message the room…" autocomplete="off" ${ready ? "" : "disabled"}>
             <button class="primary" id="send">Send</button>
@@ -435,6 +451,7 @@ async function boot() {
       const text = input.value.trim();
       if (!text) return;
       input.value = "";
+      const targets = offlineTargets();
       await invoke("send_message", { room: activeRoom ?? room, text });
       if (activeRoom !== room && activeRoom) {
         const dm = dms.get(activeRoom);
@@ -442,8 +459,12 @@ async function boot() {
           dm.msgs.push({
             id: Date.now(), sender: myId, body: text,
             ts: Date.now(), outgoing: true, epoch: 1,
+            pending: targets.length > 0,
           });
         }
+      }
+      if (targets.length) {
+        toast(`⏱ ${targets.length === 1 ? escapeHtml(targets[0]) + " is offline" : targets.length + " members are offline"} — queued, delivered when they're back`);
       }
       await refreshMessages();
       render();

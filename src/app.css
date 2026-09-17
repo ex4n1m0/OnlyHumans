@@ -71,6 +71,9 @@ main { flex: 1; display: flex; min-height: 0; }
 .chat.dm .titlebar { background: linear-gradient(135deg, #191333, #221a44); border-bottom-color: var(--violet-line); }
 .chat.dm .composer { border-top-color: var(--violet-line); }
 .chat.dm .msg.out { background: var(--violet-dim); color: #ece7ff; }
+.pending-strip { padding: 6px 14px; font-size: 12px; color: #d9b44a;
+                  background: #241d10; border-top: 1px solid #4d3d1a; }
+.msg .pend { color: #d9b44a; }
 .pp-pill { display: inline-block; background: var(--violet); color: #fff; font-size: 10px;
            font-weight: 700; letter-spacing: .1em; padding: 2px 8px; border-radius: 999px;
            text-transform: uppercase; }
