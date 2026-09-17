@@ -52,7 +52,12 @@ main { flex: 1; display: flex; min-height: 0; }
 .roominfo { padding: 10px 12px; border-bottom: 1px solid #1f3038; }
 .roominfo .status { color: var(--muted); font-size: 12px; }
 .roominfo .members-n { color: var(--teal); font-size: 11px; margin-top: 3px; font-family: monospace; }
-.sidebar li { display: flex; align-items: center; gap: 8px; }
+.sidebar li { display: flex; align-items: center; gap: 8px; position: relative; }
+.sidebar li.roomrow { background: #0c161d; border: 1px solid #1f3038; border-radius: 8px; margin: 6px 8px; padding: 8px 10px; }
+.sidebar li.roomrow.active { border-color: var(--teal); }
+.sidebar li .mname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rename-btn { background: none; border: none; color: var(--muted); font-size: 11px; padding: 2px 4px; flex-shrink: 0; }
+.rename-btn:hover { color: var(--teal); }
 .sidebar li .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .sidebar li .dot.on { background: #2ecc71; }
 .sidebar li .dot.off { background: #6b4c50; }

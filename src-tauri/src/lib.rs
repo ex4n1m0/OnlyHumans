@@ -177,11 +177,24 @@ fn record_message(
 #[tauri::command]
 async fn send_message(
     state: tauri::State<'_, AppState>,
+    room: String,
     text: String,
 ) -> Result<(), String> {
     let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
     node.cmd_tx
-        .send(Command::SendMessage { text })
+        .send(Command::SendMessage { room, text })
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn open_dm(
+    state: tauri::State<'_, AppState>,
+    peer: String,
+) -> Result<(), String> {
+    let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
+    node.cmd_tx
+        .send(Command::OpenDm { peer })
         .await
         .map_err(|e| e.to_string())
 }
@@ -278,6 +291,7 @@ pub fn run() {
             messages,
             record_message,
             send_message,
+            open_dm,
             rotate_key,
             clear_history,
             request_state,

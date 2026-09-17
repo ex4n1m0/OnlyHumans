@@ -129,8 +129,10 @@ pub struct Behaviour {
 pub enum Command {
     /// Direct dial by multiaddr (tests).
     Dial { addr: Multiaddr },
-    /// Send a chat message to the room.
-    SendMessage { text: String },
+    /// Send a chat message to a room (main room hex or a DM hex).
+    SendMessage { room: String, text: String },
+    /// Open (or re-open) a private two-person room with `peer`.
+    OpenDm { peer: String },
     /// Host-side key rotation.
     Rotate,
     /// Wipe the room's message history on every participant.
@@ -541,15 +543,23 @@ async fn handle_command(
                 let _ = event_tx.send(NodeEvent::Log { message: format!("dial failed: {e}") });
             }
         }
-        Command::SendMessage { text } => {
-            if let Some(frame) = rooms.seal_chat(text.as_bytes()) {
-                // Record our own copy first, then fan out to the mesh.
-                let room = rooms.room_hex().to_string();
-                let epoch = rooms.state().map(|st| st.crypto.epoch).unwrap_or(1);
-                let _ = store
-                    .lock()
-                    .unwrap()
-                    .append_message(&room, &identity.id_string(), text.as_str(), epoch, true);
+        Command::SendMessage { room, text } => {
+            if let Some(frame) = rooms.seal_chat(&room, text.as_bytes()) {
+                // The main room persists history; DMs are memory-only.
+                if room == rooms.room_hex() {
+                    let epoch = rooms.state().map(|st| st.crypto.epoch).unwrap_or(1);
+                    let _ = store
+                        .lock()
+                        .unwrap()
+                        .append_message(&room, &identity.id_string(), text.as_str(), epoch, true);
+                }
+                // DM frames go only to the peer; main room fans out.
+                if let Some(dm) = rooms.dm(&room) {
+                    let peer = dm.peer;
+                    enqueue(outbox, peer, Envelope::Chat { frame });
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
+                    return;
+                }
                 for peer in rooms.member_peers() {
                     if peer == identity.peer_id() {
                         continue;
@@ -578,6 +588,21 @@ async fn handle_command(
                     message: "only the host can rotate".into(),
                 });
             }
+        }
+        Command::OpenDm { peer } => {
+            let Ok(pid) = PeerId::from_str(&peer) else {
+                let _ = event_tx.send(NodeEvent::Log { message: format!("invalid peer id: {peer}") });
+                return;
+            };
+            let (hex, invite) = rooms.open_dm(pid);
+            let _ = event_tx.send(NodeEvent::RoomReady {
+                room: hex.clone(),
+                peer: pid.to_string(),
+                we_are_host: true,
+                epoch: 1,
+            });
+            enqueue(outbox, pid, invite);
+            flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, pid).await;
         }
         Command::ClearHistory => {
             if let Some(frame) = rooms.clear_envelope() {
@@ -987,13 +1012,16 @@ fn process_room_events(
                 let _ = store.lock().unwrap().clear_messages(room_id_hex);
             }
             RoomEvent::Message { room_id_hex, sender, body, epoch } => {
-                // Persist inbound history in the core (UI-independent).
-                let outgoing = sender == rooms.my_id();
-                let text = String::from_utf8_lossy(body).into_owned();
-                let _ = store
-                    .lock()
-                    .unwrap()
-                    .append_message(room_id_hex, sender, &text, *epoch, outgoing);
+                // Persist inbound history in the core (UI-independent);
+                // DMs are memory-only by design.
+                if room_id_hex == rooms.room_hex() {
+                    let outgoing = sender == rooms.my_id();
+                    let text = String::from_utf8_lossy(body).into_owned();
+                    let _ = store
+                        .lock()
+                        .unwrap()
+                        .append_message(room_id_hex, sender, &text, *epoch, outgoing);
+                }
             }
             RoomEvent::MembersChanged { members, .. } => {
                 let mut s = store.lock().unwrap();
@@ -1050,4 +1078,5 @@ fn dispatch_room_event(
         }
     }
     let _ = from;
+    let _ = (swarm, outbox);
 }

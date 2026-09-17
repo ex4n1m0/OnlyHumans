@@ -101,7 +101,9 @@ async function boot() {
     return selfName === "you" ? selfName : `${selfName} (you)`;
   };
 
-  let room: string | null = null;
+  let room: string | null = null; // main room hex
+  let activeRoom: string | null = null; // main hex or dm hex
+  const dms = new Map<string, { peer: string; msgs: ChatMessage[] }>();
   let isHost = false;
   let epoch = 1;
   let status = "connecting";
@@ -121,23 +123,42 @@ async function boot() {
   async function onNodeEvent(p: NodeEvent) {
     switch (p.kind) {
       case "message": {
-        // The core persists history; the UI just refreshes from the store.
-        if (p.room === room || room === null) {
-          room = p.room;
-          await refreshMessages();
+        if (p.room === room) {
+          // Main room: the core persists; refresh from the store.
+          if (activeRoom === room) await refreshMessages();
         } else {
-          toast(`New message from ${displayName(p.sender)}`);
+          // DM: memory only.
+          const dm = dms.get(p.room);
+          if (dm) {
+            dm.msgs.push({
+              id: Date.now(), sender: p.sender, body: p.body,
+              ts: Date.now(), outgoing: false, epoch: p.epoch,
+            });
+            if (activeRoom === p.room) {
+              render();
+            } else {
+              toast(`Private message from ${displayName(p.sender)}`);
+            }
+          }
         }
         render();
         break;
       }
       case "roomReady": {
-        room = p.room;
-        isHost = p.weAreHost;
-        hostPeer = p.peer;
-        epoch = p.epoch;
-        status = p.weAreHost ? "hosting" : "connected";
-        await refreshMessages();
+        if (room === null || p.room === room) {
+          // Main room (or first arrival).
+          room = p.room;
+          activeRoom = p.room;
+          isHost = p.weAreHost;
+          hostPeer = p.peer;
+          epoch = p.epoch;
+          status = p.weAreHost ? "hosting" : "connected";
+          await refreshMessages();
+        } else {
+          // A private room opened (by us or an invite).
+          dms.set(p.room, { peer: p.peer, msgs: [] });
+          activeRoom = p.room;
+        }
         render();
         break;
       }
@@ -185,6 +206,11 @@ async function boot() {
   }
 
   function short(peer: string) { return peer.slice(0, 10) + "…"; }
+
+  function activeRoomOf(peer: string): string | null {
+    for (const [hex, dm] of dms) if (dm.peer === peer) return hex;
+    return null;
+  }
 
   function statusLine(): string {
     switch (status) {
@@ -234,28 +260,42 @@ async function boot() {
             <div class="members-n">${members.length || (ready ? 1 : 0)} member${(members.length || 1) === 1 ? "" : "s"}</div>
           </div>
           <ul>
-            ${members.map((m) => `
-              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="${m.peer}">
-                <i class="dot ${m.peer === myId || connectedPeers.has(m.peer) ? "on" : "off"}"></i>
-                <span>${escapeHtml(memberLabel(m))}</span>
+            ${ready ? `
+            <li data-room="${room}" class="roomrow ${activeRoom === room ? "active" : ""}">
+              <i class="dot ${isHost || connectedPeers.size > 0 ? "on" : "off"}"></i>
+              <span>main room</span>
+              ${dms.size ? `<span class="peer">${dms.size} dm${dms.size === 1 ? "" : "s"}</span>` : ""}
+            </li>` : ""}
+            ${members.filter((m) => m.peer !== myId).map((m) => `
+              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""} ${dms.has(activeRoomOf(m.peer) ?? "") ? "hasdm" : ""}" title="${m.peer}">
+                <i class="dot ${connectedPeers.has(m.peer) ? "on" : "off"}"></i>
+                <span class="mname" data-peer="${m.peer}">${escapeHtml(memberLabel(m))}</span>
                 ${m.peer === hostPeer ? '<span class="peer">host</span>' : ""}
+                <button class="rename-btn" data-peer="${m.peer}" title="rename">✎</button>
               </li>`).join("")}
           </ul>
         </div>
         ${ready ? `
         <div class="chat">
           <div class="titlebar">
-            <span class="status">${statusLine()} · key epoch ${epoch}</span>
-            ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
-            <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
-              ${clearArmed ? "Really clear for everyone?" : "Clear history"}
-            </button>
+            ${activeRoom === room
+              ? `<span class="status">${statusLine()} · key epoch ${epoch}</span>
+                 ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
+                 <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
+                   ${clearArmed ? "Really clear for everyone?" : "Clear history"}
+                 </button>`
+              : (() => {
+                  const dm = dms.get(activeRoom ?? "");
+                  const peer = dm?.peer ?? "";
+                  const on = connectedPeers.has(peer);
+                  return `<span class="status"><i class="dot ${on ? "on" : "off"}"></i>${escapeHtml(displayName(peer))} · private</span>`;
+                })()}
           </div>
           <div class="messages" id="msgs">
-            ${messages.map((m) => `
+            ${(activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? [])).map((m) => `
               <div class="msg ${m.outgoing ? "out" : "in"}">
                 ${escapeHtml(m.body)}
-                <div class="meta">${m.outgoing ? "you" : escapeHtml(displayName(m.sender))} · ${fmtTime(m.ts)} · e${m.epoch}</div>
+                <div class="meta">${m.outgoing ? "you" : escapeHtml(displayName(m.sender))} · ${fmtTime(m.ts)}${activeRoom === room ? ` · e${m.epoch}` : ""}</div>
               </div>`).join("")}
           </div>
           <div class="composer">
@@ -278,12 +318,26 @@ async function boot() {
       if (renameState.focused) renameEl.focus();
     }
 
-    // Member rows: click to rename (adds a contact name).
-    document.querySelectorAll<HTMLElement>(".sidebar li").forEach((li) => {
-      li.addEventListener("click", () => {
+    // Room switcher: the pinned main-room row.
+    document.querySelector<HTMLElement>(".sidebar li.roomrow")?.addEventListener("click", async () => {
+      if (!room) return;
+      activeRoom = room;
+      await refreshMessages();
+      render();
+    });
+    // Member rows: click opens (or re-opens) a private room; the pencil
+    // renames instead.
+    document.querySelectorAll<HTMLElement>(".sidebar li[data-peer]").forEach((li) => {
+      li.addEventListener("click", (e) => {
         const peer = li.dataset.peer!;
-        if (peer === myId) return;
-        renamingPeer = peer;
+        if ((e.target as HTMLElement).classList.contains("rename-btn")) return;
+        void invoke("open_dm", { peer }).catch((err) => toast(String(err)));
+      });
+    });
+    document.querySelectorAll<HTMLElement>(".rename-btn").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        renamingPeer = b.dataset.peer ?? null;
         render();
       });
     });
@@ -358,7 +412,16 @@ async function boot() {
       const text = input.value.trim();
       if (!text) return;
       input.value = "";
-      await invoke("send_message", { text });
+      await invoke("send_message", { room: activeRoom ?? room, text });
+      if (activeRoom !== room && activeRoom) {
+        const dm = dms.get(activeRoom);
+        if (dm) {
+          dm.msgs.push({
+            id: Date.now(), sender: myId, body: text,
+            ts: Date.now(), outgoing: true, epoch: 1,
+          });
+        }
+      }
       await refreshMessages();
       render();
     }

@@ -42,8 +42,16 @@ pub enum Envelope {
     /// Host -> members: the current member list, sealed under the room key
     /// (only members may learn membership).
     Members { frame: Sealed },
-    /// Any member: a sealed chat frame (sent to every member).
+    /// Any member: a sealed chat frame (main room: sent to every member;
+    /// DMs: sent only to the peer).
     Chat { frame: Sealed },
+    /// Peer -> peer: open (or re-open) a private two-person room. The key
+    /// is GK-sealed for the recipient only; delivered directly, never
+    /// fanned out, so other members learn nothing.
+    DmInvite {
+        room_id_hex: String,
+        key_ct_b64: String,
+    },
     /// Host -> members: rotation payload sealed under the current key.
     Rotate { frame: Sealed },
     /// Any member: request that everyone wipes their local message history
@@ -102,12 +110,22 @@ pub struct MemberInfo {
     pub name: String,
 }
 
+/// An ephemeral two-person room. Memory-only by design: never persisted,
+/// so it disappears when both sides are offline.
+pub struct DmRoom {
+    pub peer: PeerId,
+    pub crypto: RoomCrypto,
+    pub my_seq: u64,
+    seen_seq: u64,
+}
+
 pub struct Rooms {
     gk: Key,
     my_id: String,
     my_name: String,
     room_hex: String,
     room: Option<RoomState>,
+    dms: HashMap<String, DmRoom>,
 }
 
 #[derive(Debug, Clone)]
@@ -145,7 +163,7 @@ impl Rooms {
     pub fn new(gk: Key, my_id: String, my_name: String) -> Self {
         let my_name = sanitize_name(&my_name);
         let room_hex = global_room_hex(&gk);
-        Self { gk, my_id, my_name, room_hex, room: None }
+        Self { gk, my_id, my_name, room_hex, room: None, dms: HashMap::new() }
     }
 
     pub fn my_id(&self) -> &str {
@@ -154,6 +172,31 @@ impl Rooms {
 
     pub fn room_hex(&self) -> &str {
         &self.room_hex
+    }
+
+    /// Deterministic private-room id for a pair: both sides compute the
+    /// same hex without coordination.
+    pub fn dm_hex(&self, other: &str) -> String {
+        let (a, b) = if self.my_id.as_str() < other {
+            (self.my_id.as_str(), other)
+        } else {
+            (other, self.my_id.as_str())
+        };
+        let mut h = Sha256::new();
+        h.update(b"OH1-dm-v1|");
+        h.update(&self.gk);
+        h.update(a.as_bytes());
+        h.update(b"|");
+        h.update(b.as_bytes());
+        hex::encode(&h.finalize()[..16])
+    }
+
+    pub fn dm(&self, room_hex: &str) -> Option<&DmRoom> {
+        self.dms.get(room_hex)
+    }
+
+    pub fn dm_peers(&self) -> Vec<PeerId> {
+        self.dms.values().map(|d| d.peer).collect()
     }
 
     pub fn state(&self) -> Option<&RoomState> {
@@ -227,6 +270,26 @@ impl Rooms {
         self.room = None;
     }
 
+    /// Open (or re-open) a private room with `peer`. Returns the room hex
+    /// and the DmInvite envelope to deliver directly to them. Creating is
+    /// idempotent: an existing room keeps its key; the invite is resent
+    /// anyway so a peer that lost it (restart) re-syncs.
+    pub fn open_dm(&mut self, peer: PeerId) -> (String, Envelope) {
+        let hex = self.dm_hex(&peer.to_string());
+        if !self.dms.contains_key(&hex) {
+            let room_id: RoomId = hex::decode(&hex).ok().and_then(|v| v.try_into().ok()).expect("dm hex");
+            let mut key = Key::default();
+            rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut key);
+            self.dms.insert(
+                hex.clone(),
+                DmRoom { peer, crypto: RoomCrypto::from_delivered(room_id, key), my_seq: now_seed(), seen_seq: 0 },
+            );
+        }
+        let dm = &self.dms[&hex];
+        let ct = crypto::seal_room_key(&self.gk, &dm.crypto.room_id, &peer.to_string(), dm.crypto.room_key());
+        (hex.clone(), Envelope::DmInvite { room_id_hex: hex, key_ct_b64: crypto::base64_encode(&ct) })
+    }
+
     /// Build the Join envelope with a fresh GK proof.
     pub fn join_envelope(&self) -> Envelope {
         let mut gnonce = [0u8; 16];
@@ -241,14 +304,20 @@ impl Rooms {
         }
     }
 
-    /// Seal a chat message (one frame, transported to every member).
-    pub fn seal_chat(&mut self, body: &[u8]) -> Option<Sealed> {
-        let st = self.room.as_mut()?;
-        if !st.has_key {
-            return None; // still joining
+    /// Seal a chat message for a room we are in (one frame; the transport
+    /// decides fan-out: members for the main room, the peer for DMs).
+    pub fn seal_chat(&mut self, room_hex: &str, body: &[u8]) -> Option<Sealed> {
+        if room_hex == self.room_hex {
+            let st = self.room.as_mut()?;
+            if !st.has_key {
+                return None; // still joining
+            }
+            st.my_seq += 1;
+            return Some(st.crypto.seal(&self.my_id, st.my_seq, crypto::kinds::CHAT, body));
         }
-        st.my_seq += 1;
-        Some(st.crypto.seal(&self.my_id, st.my_seq, crypto::kinds::CHAT, body))
+        let dm = self.dms.get_mut(room_hex)?;
+        dm.my_seq += 1;
+        Some(dm.crypto.seal(&self.my_id, dm.my_seq, crypto::kinds::CHAT, body))
     }
 
     /// Build the sealed clear-history frame (one per member fan-out).
@@ -441,15 +510,66 @@ impl Rooms {
                     Err(e) => out.push(err(&format!("members: {e}"))),
                 }
             }
-            Envelope::Chat { frame } => match self.open_frame(&frame, crypto::kinds::CHAT) {
-                Ok((body, epoch, sender)) => out.push(RoomEvent::Message {
-                    room_id_hex: frame.room_id_hex,
-                    sender,
-                    body,
-                    epoch,
-                }),
-                Err(e) => out.push(err(&format!("chat: {e}"))),
-            },
+            Envelope::Chat { frame } => {
+                let room_hex = frame.room_id_hex.clone();
+                match self.open_frame(&frame, crypto::kinds::CHAT) {
+                    Ok((body, epoch, sender)) => out.push(RoomEvent::Message {
+                        room_id_hex: room_hex,
+                        sender,
+                        body,
+                        epoch,
+                    }),
+                    Err(e) => {
+                        // A frame for a room we don't hold: for DMs this
+                        // means the peer lost it (restart) — tell them so
+                        // they re-invite us.
+                        if e.to_string().contains("unknown room") || e.to_string().contains("no room state") {
+                            out.push(RoomEvent::Send {
+                                peer: from,
+                                envelope: Envelope::Error {
+                                    message: format!("unknown-room:{room_hex}"),
+                                },
+                            });
+                        }
+                        out.push(err(&format!("chat: {e}")));
+                    }
+                }
+            }
+            Envelope::DmInvite { room_id_hex, key_ct_b64 } => {
+                if room_id_hex == self.room_hex {
+                    return out; // never via DM mechanics
+                }
+                let ct = match crypto::base64_decode(&key_ct_b64) {
+                    Ok(c) => c,
+                    Err(_) => return out,
+                };
+                let room_id: RoomId = match hex::decode(&room_id_hex).ok().and_then(|v| v.try_into().ok()) {
+                    Some(r) => r,
+                    None => return out,
+                };
+                // The seal was made for OUR id — only the intended peer
+                // can open it.
+                let key = match crypto::open_room_key(&self.gk, &room_id, &self.my_id, &ct) {
+                    Ok(k) => k,
+                    Err(_) => {
+                        out.push(err("dm invite failed GK authentication"));
+                        return out;
+                    }
+                };
+                if self.dms.contains_key(&room_id_hex) {
+                    return out; // already have (or had) this DM — keep our state
+                }
+                self.dms.insert(
+                    room_id_hex.clone(),
+                    DmRoom { peer: from, crypto: RoomCrypto::from_delivered(room_id, key), my_seq: now_seed(), seen_seq: 0 },
+                );
+                out.push(RoomEvent::RoomReady {
+                    room_id_hex,
+                    host: from,
+                    role: Role::Guest,
+                    epoch: 1,
+                });
+            }
             Envelope::Rotate { frame } => {
                 let room_hex = frame.room_id_hex.clone();
                 match self.open_frame(&frame, crypto::kinds::ROTATE) {
@@ -499,7 +619,29 @@ impl Rooms {
                     });
                 }
             }
-            Envelope::Ack | Envelope::Error { .. } => {}
+            Envelope::Ack => {}
+            Envelope::Error { message } => {
+                // A peer could not decrypt a DM frame (they lost the room
+                // to a restart): re-invite them with our existing key.
+                if let Some(hex) = message.strip_prefix("unknown-room:") {
+                    if self.dms.contains_key(hex) {
+                        let dm = &self.dms[hex];
+                        let ct = crypto::seal_room_key(
+                            &self.gk,
+                            &dm.crypto.room_id,
+                            &from.to_string(),
+                            dm.crypto.room_key(),
+                        );
+                        out.push(RoomEvent::Send {
+                            peer: from,
+                            envelope: Envelope::DmInvite {
+                                room_id_hex: hex.to_string(),
+                                key_ct_b64: crypto::base64_encode(&ct),
+                            },
+                        });
+                    }
+                }
+            }
         }
         out
     }
@@ -584,7 +726,20 @@ impl Rooms {
         kind: &[u8; 8],
     ) -> anyhow::Result<(Vec<u8>, u64, String)> {
         if frame.room_id_hex != self.room_hex {
-            anyhow::bail!("frame for unknown room");
+            // Private room frame.
+            let dm = self
+                .dms
+                .get_mut(&frame.room_id_hex)
+                .ok_or_else(|| anyhow::anyhow!("frame for unknown room"))?;
+            let sender = frame.sender.clone();
+            let seq = frame.seq;
+            let epoch = frame.epoch;
+            let body = dm.crypto.open(frame, kind)?;
+            if seq <= dm.seen_seq {
+                anyhow::bail!("replayed sequence {seq} from {sender}");
+            }
+            dm.seen_seq = seq;
+            return Ok((body, epoch, sender));
         }
         let st = self
             .room
