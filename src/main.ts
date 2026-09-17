@@ -259,24 +259,37 @@ async function boot() {
             <div class="status">${statusLine()}</div>
             <div class="members-n">${members.length || (ready ? 1 : 0)} member${(members.length || 1) === 1 ? "" : "s"}</div>
           </div>
+          <div class="side-label">rooms</div>
           <ul>
             ${ready ? `
             <li data-room="${room}" class="roomrow ${activeRoom === room ? "active" : ""}">
               <i class="dot ${isHost || connectedPeers.size > 0 ? "on" : "off"}"></i>
               <span>main room</span>
-              ${dms.size ? `<span class="peer">${dms.size} dm${dms.size === 1 ? "" : "s"}</span>` : ""}
+              <span class="peer">${members.length || 1}</span>
             </li>` : ""}
+          </ul>
+          ${dms.size ? `
+          <div class="side-label plabel">private</div>
+          <ul>
+            ${[...dms.entries()].map(([hex, dm]) => `
+              <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${dm.peer}">
+                <i class="dot ${connectedPeers.has(dm.peer) ? "on" : "off"}"></i>
+                <span class="mname">${escapeHtml(displayName(dm.peer))}</span>
+              </li>`).join("")}
+          </ul>` : ""}
+          <div class="side-label">members</div>
+          <ul>
             ${members.filter((m) => m.peer !== myId).map((m) => `
-              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""} ${dms.has(activeRoomOf(m.peer) ?? "") ? "hasdm" : ""}" title="${m.peer}">
+              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="${m.peer}">
                 <i class="dot ${connectedPeers.has(m.peer) ? "on" : "off"}"></i>
                 <span class="mname" data-peer="${m.peer}">${escapeHtml(memberLabel(m))}</span>
                 ${m.peer === hostPeer ? '<span class="peer">host</span>' : ""}
-                <button class="rename-btn" data-peer="${m.peer}" title="rename">✎</button>
+                <button class="rename-btn" data-peer="${m.peer}" title="private room + double-click to rename">✎</button>
               </li>`).join("")}
           </ul>
         </div>
         ${ready ? `
-        <div class="chat">
+        <div class="chat ${activeRoom === room ? "" : "dm"}">
           <div class="titlebar">
             ${activeRoom === room
               ? `<span class="status">${statusLine()} · key epoch ${epoch}</span>
@@ -288,7 +301,7 @@ async function boot() {
                   const dm = dms.get(activeRoom ?? "");
                   const peer = dm?.peer ?? "";
                   const on = connectedPeers.has(peer);
-                  return `<span class="status"><i class="dot ${on ? "on" : "off"}"></i>${escapeHtml(displayName(peer))} · private</span>`;
+                  return `<span class="status"><i class="dot ${on ? "on" : "off"}"></i>${escapeHtml(displayName(peer))}</span><span class="pp-pill">private</span>`;
                 })()}
           </div>
           <div class="messages" id="msgs">
@@ -324,6 +337,16 @@ async function boot() {
       activeRoom = room;
       await refreshMessages();
       render();
+    });
+    // Open private rooms listed in the sidebar: click to switch.
+    document.querySelectorAll<HTMLElement>(".sidebar li.dmrow").forEach((li) => {
+      li.addEventListener("click", () => {
+        const hex = li.dataset.dm!;
+        if (dms.has(hex)) {
+          activeRoom = hex;
+          render();
+        }
+      });
     });
     // Member rows: click opens (or re-opens) a private room; the pencil
     // renames instead.
