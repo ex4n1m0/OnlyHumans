@@ -576,6 +576,14 @@ async fn handle_command(
         Command::Rotate => {
             if let Some(frame) = rooms.rotate() {
                 persist_room(rooms, store);
+                // The host is a participant too: apply its own rotation to
+                // its UI (epoch display) like everyone else.
+                if let Some(st) = rooms.state() {
+                    let _ = event_tx.send(NodeEvent::Rotated {
+                        room: rooms.room_hex().to_string(),
+                        new_epoch: st.crypto.epoch,
+                    });
+                }
                 for peer in rooms.member_peers() {
                     if peer == identity.peer_id() {
                         continue;

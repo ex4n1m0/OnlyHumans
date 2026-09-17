@@ -1,10 +1,11 @@
-//! Connectivity proof: a chat delivered entirely through a peer relay.
+//! Connectivity proof: a room join and chat delivered entirely through a
+//! peer relay.
 //!
 //! Topology (all in-process, real libp2p transports):
 //!
 //!   R = relay node (offers HOP service)
-//!   B = peer reachable ONLY via the relay (reserves a circuit through R)
-//!   A = conversation host, dials B's circuit address
+//!   B = guest reachable ONLY via the relay (reserves a circuit through R)
+//!   A = founding room host, dials B's circuit address
 //!
 //! A --(circuit via R)--> B must complete the full room lifecycle.
 
@@ -21,10 +22,11 @@ async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> 
             .expect("node task died");
         let kind = match &ev {
             NodeEvent::Listening { .. } => "listening",
-            NodeEvent::InvitationReceived { .. } => "invitation",
+            NodeEvent::JoinStatus { .. } => "join_status",
             NodeEvent::RoomReady { .. } => "room_ready",
             NodeEvent::Message { .. } => "message",
-            NodeEvent::ApprovalRequested { .. } => "approval",
+            NodeEvent::MembersChanged { .. } => "members",
+            NodeEvent::MessagesCleared { .. } => "messages_cleared",
             NodeEvent::Rotated { .. } => "rotated",
             NodeEvent::ConnectionStateChanged { .. } => "conn",
             NodeEvent::Log { .. } => "log",
@@ -88,29 +90,45 @@ async fn chat_through_peer_relay() {
         }
     };
 
+    // --- A: founding host of the room ---
+    let (a_tx, mut a_rx) = mpsc::unbounded_channel();
+    let a = spawn(
+        NodeConfig {
+            data_dir: temp_dir("a"),
+            offline: true,
+            assume_host: true,
+            username: Some("alice".into()),
+            ..Default::default()
+        },
+        a_tx,
+    )
+    .await
+    .unwrap();
+    let room_hex = match next_event(&mut a_rx, "room_ready").await {
+        NodeEvent::RoomReady { room, we_are_host: true, .. } => room,
+        other => panic!("A should found the room, got {other:?}"),
+    };
+
     // --- B: no reachable listener of its own; reserves through R ---
     let (b_tx, mut b_rx) = mpsc::unbounded_channel();
     let b = spawn(
         NodeConfig {
             data_dir: temp_dir("b"),
             offline: true,
-            // B has listeners on localhost in reality; the point is that A
-            // will reach it ONLY via the circuit address.
             listen_quic: None,
+            room_host: Some(a.peer_id.to_string()),
+            username: Some("bob".into()),
             ..Default::default()
         },
         b_tx,
     )
     .await
     .unwrap();
-    // B connects to R directly, then reserves a circuit through it.
     let dial = format!("{r_addr}/p2p/{}", r.peer_id);
     b.cmd_tx
         .send(Command::Dial { addr: dial.parse().unwrap() })
         .await
         .unwrap();
-    // Let the identify exchange complete first: the relay enables its HOP
-    // service only after learning an observed (external) address.
     tokio::time::sleep(Duration::from_secs(3)).await;
     b.cmd_tx
         .send(Command::ReserveWith { addr: dial.parse().unwrap() })
@@ -121,55 +139,20 @@ async fn chat_through_peer_relay() {
         "B never obtained a relay reservation"
     );
 
-    // --- A: host of the conversation; dials B through the circuit ---
-    let (a_tx, mut a_rx) = mpsc::unbounded_channel();
-    let a = spawn(
-        NodeConfig {
-            data_dir: temp_dir("a"),
-            offline: true,
-            auto_approve: true,
-            ..Default::default()
-        },
-        a_tx,
-    )
-    .await
-    .unwrap();
-    a.cmd_tx
-        .send(Command::OpenConversation { peer: b.peer_id.to_string() })
-        .await
-        .unwrap();
+    // --- A dials B through the circuit; B's tick then sends its Join ---
     let circuit = format!("{r_addr}/p2p/{}/p2p-circuit/p2p/{}", r.peer_id, b.peer_id);
     a.cmd_tx
         .send(Command::Dial { addr: circuit.parse().unwrap() })
         .await
         .unwrap();
 
-    // --- B consents to the invitation, then the handshake completes ---
-    let invite = next_event(&mut b_rx, "invitation").await;
-    let (room_hex, host) = match invite {
-        NodeEvent::InvitationReceived { room, host } => (room, host),
-        other => panic!("expected invitation, got {other:?}"),
-    };
-    b.cmd_tx
-        .send(Command::AcceptInvitation { room: room_hex, host })
-        .await
-        .unwrap();
+    match next_event(&mut b_rx, "room_ready").await {
+        NodeEvent::RoomReady { room, we_are_host: false, .. } => assert_eq!(room, room_hex),
+        other => panic!("B should join via relay, got {other:?}"),
+    }
 
-    // --- The full handshake over the relayed connection ---
-    let a_ready = next_event(&mut a_rx, "room_ready").await;
-    let b_ready = next_event(&mut b_rx, "room_ready").await;
-    let room = match a_ready {
-        NodeEvent::RoomReady { room, we_are_host: true, .. } => room,
-        other => panic!("A should be host, got {other:?}"),
-    };
-    assert!(
-        matches!(&b_ready, NodeEvent::RoomReady { room: rr, we_are_host: false, .. } if *rr == room),
-        "B should be guest in the same room, got {b_ready:?}"
-    );
-
-    // --- Chat both ways through the relay ---
     a.cmd_tx
-        .send(Command::SendMessage { room: room.clone(), text: "hello via relay".into() })
+        .send(Command::SendMessage { room: room_hex.clone(), text: "hello via relay".into() })
         .await
         .unwrap();
     match next_event(&mut b_rx, "message").await {
@@ -177,15 +160,11 @@ async fn chat_through_peer_relay() {
         other => panic!("expected message, got {other:?}"),
     }
     b.cmd_tx
-        .send(Command::SendMessage { room, text: "relayed back".into() })
+        .send(Command::SendMessage { room: room_hex, text: "relayed back".into() })
         .await
         .unwrap();
     match next_event(&mut a_rx, "message").await {
         NodeEvent::Message { body, .. } => assert_eq!(body, "relayed back"),
         other => panic!("expected reply, got {other:?}"),
     }
-
-    // The relay node itself must never see plaintext (it only shuffles
-    // already-encrypted frames) — structurally true by design; nothing to
-    // assert at runtime here beyond the relayed exchange having worked.
 }

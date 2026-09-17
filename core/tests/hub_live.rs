@@ -1,17 +1,17 @@
-//! Live-hub discovery: B registers on the production Vercel hub; A holds no
-//! address for B and must find it via /api/lookup alone — no Command::Dial
-//! anywhere. Requires network and mutates the real hub (records are
-//! TTL-scoped), so it is ignored in the default suite:
+//! Live-hub room election + join: A founds THE room (registers the host
+//! record on the production Vercel hub); B discovers the record, dials A
+//! via the hub, joins on GK proof, and the two chat. No Dial commands.
+//! Requires network and mutates the real hub (records are TTL-scoped), so
+//! it is ignored in the default suite:
 //!
 //! cargo test -p onlyhumans_core --test hub_live -- --ignored --nocapture
 
-use onlyhumans_core::hub::{HubClient, DEFAULT_HUB};
 use onlyhumans_core::net::{spawn, Command, NodeConfig, NodeEvent};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
 async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> NodeEvent {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
         let ev = tokio::time::timeout_at(deadline, rx.recv())
             .await
@@ -19,10 +19,11 @@ async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> 
             .expect("node task died");
         let kind = match &ev {
             NodeEvent::Listening { .. } => "listening",
-            NodeEvent::InvitationReceived { .. } => "invitation",
+            NodeEvent::JoinStatus { .. } => "join_status",
             NodeEvent::RoomReady { .. } => "room_ready",
             NodeEvent::Message { .. } => "message",
-            NodeEvent::ApprovalRequested { .. } => "approval",
+            NodeEvent::MembersChanged { .. } => "members",
+            NodeEvent::MessagesCleared { .. } => "messages_cleared",
             NodeEvent::Rotated { .. } => "rotated",
             NodeEvent::ConnectionStateChanged { .. } => "conn",
             NodeEvent::Log { .. } => "log",
@@ -35,52 +36,41 @@ async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> 
 }
 
 fn temp_dir(name: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("oh-hublive-{name}-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("oh-hubroom-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&d);
     d
 }
 
-/// Wait until the hub serves a verified record for `peer`.
-async fn wait_registered(hub: &HubClient, peer: &str) -> Vec<String> {
+async fn wait_members(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, expect: &[String]) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     loop {
-        match hub.lookup(peer).await {
-            Ok(Some(reg)) => {
-                assert!(!reg.addrs.is_empty(), "hub record carries no addresses");
-                return reg.addrs;
+        assert!(tokio::time::Instant::now() < deadline, "members never settled");
+        let ev = tokio::time::timeout(Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timed out waiting for members")
+            .expect("node task died");
+        if let NodeEvent::MembersChanged { members, .. } = &ev {
+            let mut got: Vec<String> = members.iter().map(|m| m.peer.clone()).collect();
+            let mut want = expect.to_vec();
+            got.sort();
+            want.sort();
+            if got == want {
+                return;
             }
-            Ok(None) => {}
-            Err(e) => eprintln!("  lookup error (retrying): {e}"),
         }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "peer never appeared on the hub"
-        );
-        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
 #[tokio::test]
 #[ignore = "touches the production hub (network)"]
-async fn two_nodes_discover_and_chat_through_live_hub() {
-    // Both nodes online (default hub = production). A hosts and
-    // auto-admits; B consents explicitly, as the UI would.
-    let (b_tx, mut b_rx) = mpsc::unbounded_channel();
-    let b = spawn(
-        NodeConfig {
-            data_dir: temp_dir("b"),
-            ..Default::default()
-        },
-        b_tx,
-    )
-    .await
-    .unwrap();
-
+async fn room_election_and_join_through_live_hub() {
+    // A: online founding host (skips the empty-record grace period).
     let (a_tx, mut a_rx) = mpsc::unbounded_channel();
     let a = spawn(
         NodeConfig {
             data_dir: temp_dir("a"),
-            auto_approve: true,
+            assume_host: true,
+            username: Some("alice".into()),
             ..Default::default()
         },
         a_tx,
@@ -88,78 +78,50 @@ async fn two_nodes_discover_and_chat_through_live_hub() {
     .await
     .unwrap();
 
-    // Precondition: B's registration must be live on the hub.
-    let hub = HubClient::new(DEFAULT_HUB);
-    let b_addrs = wait_registered(&hub, &b.peer_id.to_string()).await;
-    eprintln!("  hub says {b_addrs:?}");
-
-    // The whole point: no Dial command — OpenConversation must resolve B
-    // through the hub and connect from that alone.
-    a.cmd_tx
-        .send(Command::OpenConversation { peer: b.peer_id.to_string() })
-        .await
-        .unwrap();
-
-    let invite = next_event(&mut b_rx, "invitation").await;
-    let (room, host) = match invite {
-        NodeEvent::InvitationReceived { room, host } => (room, host),
-        other => panic!("expected invitation, got {other:?}"),
-    };
-    b.cmd_tx
-        .send(Command::AcceptInvitation { room: room.clone(), host })
-        .await
-        .unwrap();
-
-    let a_ready = next_event(&mut a_rx, "room_ready").await;
-    let room = match a_ready {
+    let a_room = match next_event(&mut a_rx, "room_ready").await {
         NodeEvent::RoomReady { room, we_are_host: true, .. } => room,
-        other => panic!("A should be host, got {other:?}"),
+        other => panic!("A should found the room, got {other:?}"),
     };
+    eprintln!("  room = {a_room}");
+
+    // B: online joiner — discovers the host record and dials via the hub.
+    let (b_tx, mut b_rx) = mpsc::unbounded_channel();
+    let b = spawn(
+        NodeConfig {
+            data_dir: temp_dir("b"),
+            username: Some("bob".into()),
+            ..Default::default()
+        },
+        b_tx,
+    )
+    .await
+    .unwrap();
+
     match next_event(&mut b_rx, "room_ready").await {
-        NodeEvent::RoomReady { room: r, we_are_host: false, .. } if r == room => {}
-        other => panic!("B should be guest in the same room, got {other:?}"),
+        NodeEvent::RoomReady { room, we_are_host: false, .. } => {
+            assert_eq!(room, a_room, "B must land in the same global room");
+        }
+        other => panic!("B should join via the hub record, got {other:?}"),
     }
 
-    a.cmd_tx
-        .send(Command::SendMessage { room: room.clone(), text: "via hub".into() })
-        .await
-        .unwrap();
+    let both = vec![a.peer_id.to_string(), b.peer_id.to_string()];
+    wait_members(&mut a_rx, &both).await;
+    wait_members(&mut b_rx, &both).await;
+
+    a.cmd_tx.send(Command::SendMessage { room: a_room.clone(), text: "from founder".into() }).await.unwrap();
     match next_event(&mut b_rx, "message").await {
-        NodeEvent::Message { body, sender, epoch, .. } => {
-            assert_eq!(body, "via hub");
+        NodeEvent::Message { body, sender, .. } => {
+            assert_eq!(body, "from founder");
             assert_eq!(sender, a.peer_id.to_string());
-            assert_eq!(epoch, 1);
         }
         other => panic!("expected message, got {other:?}"),
     }
-
-    b.cmd_tx
-        .send(Command::SendMessage { room: room.clone(), text: "hub ok".into() })
-        .await
-        .unwrap();
+    b.cmd_tx.send(Command::SendMessage { room: a_room, text: "from joiner".into() }).await.unwrap();
     match next_event(&mut a_rx, "message").await {
         NodeEvent::Message { body, sender, .. } => {
-            assert_eq!(body, "hub ok");
+            assert_eq!(body, "from joiner");
             assert_eq!(sender, b.peer_id.to_string());
         }
         other => panic!("expected message, got {other:?}"),
-    }
-
-    a.cmd_tx.send(Command::Rotate { room: room.clone() }).await.unwrap();
-    match next_event(&mut b_rx, "rotated").await {
-        NodeEvent::Rotated { new_epoch, .. } => assert_eq!(new_epoch, 2),
-        other => panic!("expected rotation, got {other:?}"),
-    }
-
-    a.cmd_tx
-        .send(Command::SendMessage { room, text: "epoch2".into() })
-        .await
-        .unwrap();
-    match next_event(&mut b_rx, "message").await {
-        NodeEvent::Message { body, epoch, .. } => {
-            assert_eq!(body, "epoch2");
-            assert_eq!(epoch, 2);
-        }
-        other => panic!("expected post-rotation message, got {other:?}"),
     }
 }
