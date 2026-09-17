@@ -165,8 +165,6 @@ async function main() {
     layout.innerHTML = `
       <header>
         <span class="logo">OnlyHumans</span>
-        <span class="myid" title="click to copy — your ID">${myId}</span>
-        <button id="copy-id">Copy ID</button>
       </header>
       <main>
         <div class="sidebar">
@@ -218,15 +216,6 @@ async function main() {
       renameEl.value = renameState.value;
       if (renameState.focused) renameEl.focus();
     }
-
-    document.getElementById("copy-id")?.addEventListener("click", () => {
-      navigator.clipboard.writeText(myId);
-      toast("ID copied");
-    });
-    document.querySelector<HTMLElement>(".myid")?.addEventListener("click", () => {
-      navigator.clipboard.writeText(myId);
-      toast("ID copied");
-    });
 
     // Member rows: click to rename (adds a contact name).
     document.querySelectorAll<HTMLElement>(".sidebar li").forEach((li) => {
