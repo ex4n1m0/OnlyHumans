@@ -18,6 +18,126 @@ fn my_id(state: State<AppState>) -> String {
 }
 
 #[tauri::command]
+fn has_username(app: AppHandle) -> bool {
+    resolve_dir(&app).map(|d| read_username(&d).is_some()).unwrap_or(false)
+}
+
+#[tauri::command]
+async fn set_username(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<(), String> {
+    let name: String = name.chars().filter(|c| !c.is_control()).take(32).collect();
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("name must not be empty".into());
+    }
+    let dir = resolve_dir(&app).ok_or("no data dir")?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join("username.txt"), &name).map_err(|e| e.to_string())?;
+    // Idempotent: if the node is already running the name applies from the
+    // next join/re-join; otherwise start it now.
+    if state.node.lock().unwrap().is_none() {
+        start_node(app, dir, name);
+    }
+    Ok(())
+}
+
+fn resolve_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
+    // OH_DATA_DIR overrides the profile location (multi-instance testing).
+    if let Some(d) = std::env::var_os("OH_DATA_DIR") {
+        let d = std::path::PathBuf::from(d);
+        let _ = std::fs::create_dir_all(&d);
+        return Some(d);
+    }
+    use tauri::Manager;
+    app.path().app_data_dir().ok()
+}
+
+fn read_username(dir: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(dir.join("username.txt")).ok()?;
+    let name = raw.chars().filter(|c| !c.is_control()).take(32).collect::<String>();
+    let name = name.trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+/// Spawn the core node + event pump. Called at startup when a username
+/// already exists, or from `set_username` after the first-run gate.
+fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String) {
+    // Diagnostics for shipped builds: everything else only reaches
+    // eprintln/WebView console, which release users cannot see.
+    let log_dir = dir.join("logs");
+    append_log(
+        &log_dir,
+        &format!(
+            "=== OnlyHumans v{} starting, peer {}",
+            env!("CARGO_PKG_VERSION"),
+            app_handle.try_state::<AppState>().map(|s| s.my_id.clone()).unwrap_or_default()
+        ),
+    );
+    let cfg = NodeConfig {
+        data_dir: dir,
+        username: Some(username),
+        ..Default::default()
+    };
+    tauri::async_runtime::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let node = match spawn(cfg, tx).await {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("node failed to start: {e}");
+                append_log(&log_dir, &format!("node failed to start: {e}"));
+                return;
+            }
+        };
+        if let Some(state) = app_handle.try_state::<AppState>() {
+            *state.node.lock().unwrap() = Some(node);
+        }
+        while let Some(ev) = rx.recv().await {
+            match &ev {
+                NodeEvent::Log { message } => append_log(&log_dir, message),
+                NodeEvent::ConnectionStateChanged { peer, connected } => append_log(
+                    &log_dir,
+                    &format!("conn {peer} {}", if *connected { "up" } else { "down" }),
+                ),
+                NodeEvent::Listening { addr } => {
+                    append_log(&log_dir, &format!("listening {addr}"))
+                }
+                _ => {}
+            }
+            // Desktop toast when the window is in the background.
+            // Metadata only: no message content ever enters the
+            // Windows notification history.
+            let toast = match &ev {
+                NodeEvent::Message { sender, .. } => {
+                    Some(format!("New message from {}", &sender[..10.min(sender.len())]))
+                }
+                _ => None,
+            };
+            if let Some(body) = toast {
+                let unfocused = app_handle
+                    .get_webview_window("main")
+                    .map(|w| !w.is_focused().unwrap_or(true))
+                    .unwrap_or(true);
+                if unfocused {
+                    if let Err(e) = app_handle
+                        .notification()
+                        .builder()
+                        .title("OnlyHumans")
+                        .body(body)
+                        .show()
+                    {
+                        append_log(&log_dir, &format!("notification failed: {e}"));
+                    }
+                }
+            }
+            let _ = app_handle.emit("node-event", &ev);
+        }
+    });
+}
+
+#[tauri::command]
 fn conversations(state: State<AppState>) -> Result<Vec<Conversation>, String> {
     state.store.lock().unwrap().conversations().map_err(|e| e.to_string())
 }
@@ -140,76 +260,19 @@ pub fn run() {
                 node: Mutex::new(None),
                 my_id: my_id.clone(),
             });
-            // Diagnostics for shipped builds: everything else only reaches
-            // eprintln/WebView console, which release users cannot see.
-            let log_dir = dir.join("logs");
-            append_log(
-                &log_dir,
-                &format!("=== OnlyHumans v{} starting, peer {my_id}", env!("CARGO_PKG_VERSION")),
-            );
-            let cfg = NodeConfig {
-                data_dir: dir,
-                ..Default::default()
-            };
-            tauri::async_runtime::spawn(async move {
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                let node = match spawn(cfg, tx).await {
-                    Ok(n) => n,
-                    Err(e) => {
-                        eprintln!("node failed to start: {e}");
-                        append_log(&log_dir, &format!("node failed to start: {e}"));
-                        return;
-                    }
-                };
-                if let Some(state) = app_handle.try_state::<AppState>() {
-                    *state.node.lock().unwrap() = Some(node);
-                }
-                while let Some(ev) = rx.recv().await {
-                    match &ev {
-                        NodeEvent::Log { message } => append_log(&log_dir, message),
-                        NodeEvent::ConnectionStateChanged { peer, connected } => append_log(
-                            &log_dir,
-                            &format!("conn {peer} {}", if *connected { "up" } else { "down" }),
-                        ),
-                        NodeEvent::Listening { addr } => {
-                            append_log(&log_dir, &format!("listening {addr}"))
-                        }
-                        _ => {}
-                    }
-                    // Desktop toast when the window is in the background.
-                    // Metadata only: no message content ever enters the
-                    // Windows notification history.
-                    let toast = match &ev {
-                        NodeEvent::Message { sender, .. } => {
-                            Some(format!("New message from {}", &sender[..10.min(sender.len())]))
-                        }
-                        _ => None,
-                    };
-                    if let Some(body) = toast {
-                        let unfocused = app_handle
-                            .get_webview_window("main")
-                            .map(|w| !w.is_focused().unwrap_or(true))
-                            .unwrap_or(true);
-                        if unfocused {
-                            if let Err(e) = app_handle
-                                .notification()
-                                .builder()
-                                .title("OnlyHumans")
-                                .body(body)
-                                .show()
-                            {
-                                append_log(&log_dir, &format!("notification failed: {e}"));
-                            }
-                        }
-                    }
-                    let _ = app_handle.emit("node-event", &ev);
-                }
-            });
+
+            // The node only starts once a username exists (the UI gates
+            // first-run on it); returning members start immediately.
+            if let Some(name) = read_username(&dir) {
+                start_node(app_handle, dir, name);
+            }
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             my_id,
+            has_username,
+            set_username,
             conversations,
             contacts,
             messages,

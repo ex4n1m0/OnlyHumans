@@ -98,4 +98,11 @@ button.danger { background: transparent; border-color: var(--danger); color: var
 }
 .toast .actions { margin-top: 8px; display: flex; gap: 6px; }
 .empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: .7rem; text-align: center; padding: 2rem; }
+.gate h2 { color: #fff; font-size: 1.5rem; }
+.gate p { color: var(--muted); }
+.gate .gaterow { display: flex; gap: .6rem; margin-top: .6rem; }
+.gate input { width: 240px; }
+.gatehint { min-height: 1.2rem; color: var(--danger); font-size: .85rem; }
 .hint { color: var(--muted); font-size: 12px; padding: 6px 12px; }

@@ -18,7 +18,7 @@ use crate::crypto::{self, Key, RoomCrypto, RoomId, Sealed};
 use libp2p::PeerId;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum Envelope {
@@ -28,6 +28,8 @@ pub enum Envelope {
         guest_id: String,
         guest_nonce_b64: String,
         guest_proof_b64: String,
+        /// Display name the joiner wants to be known by.
+        name: String,
     },
     /// Host -> guest: the room key GK-sealed for the recipient, plus the
     /// current member list (peer ids, including the recipient).
@@ -35,7 +37,7 @@ pub enum Envelope {
         room_id_hex: String,
         epoch: u64,
         key_ct_b64: String,
-        members: Vec<String>,
+        members: Vec<MemberInfo>,
     },
     /// Host -> members: the current member list, sealed under the room key
     /// (only members may learn membership).
@@ -65,9 +67,10 @@ pub struct RoomState {
     pub role: Role,
     /// Who currently hosts the room (ourselves when we host).
     pub host: PeerId,
-    /// Known member peer ids (including ourselves). Maintained by the
-    /// host authoritatively; guests apply host-sent lists.
-    pub members: HashSet<String>,
+    /// Known members: peer id -> display name (including ourselves).
+    /// Maintained by the host authoritatively; guests apply host-sent
+    /// lists.
+    pub members: HashMap<String, String>,
     /// Outgoing sequence numbers are wall-clock seeded so they survive
     /// restarts without persistence (receiver replay guard).
     pub my_seq: u64,
@@ -79,8 +82,8 @@ pub struct RoomState {
 
 impl RoomState {
     fn new(crypto: RoomCrypto, role: Role, host: PeerId, my_id: &str, has_key: bool) -> Self {
-        let mut members = HashSet::new();
-        members.insert(my_id.to_string());
+        let mut members = HashMap::new();
+        members.insert(my_id.to_string(), String::new());
         Self {
             crypto,
             role,
@@ -93,15 +96,16 @@ impl RoomState {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MemberInfo {
     pub peer: String,
-    pub host: bool,
+    pub name: String,
 }
 
 pub struct Rooms {
     gk: Key,
     my_id: String,
+    my_name: String,
     room_hex: String,
     room: Option<RoomState>,
 }
@@ -115,7 +119,7 @@ pub enum RoomEvent {
     /// Plaintext chat message received.
     Message { room_id_hex: String, sender: String, body: Vec<u8>, epoch: u64 },
     /// The member list changed.
-    MembersChanged { room_id_hex: String, members: Vec<String> },
+    MembersChanged { room_id_hex: String, members: Vec<MemberInfo> },
     /// Every participant should wipe its local message history.
     MessagesCleared { room_id_hex: String },
     /// A key rotation was applied.
@@ -134,13 +138,14 @@ pub fn global_room_hex(gk: &Key) -> String {
 
 #[derive(Serialize, Deserialize)]
 struct MembersPayload {
-    members: Vec<String>,
+    members: Vec<MemberInfo>,
 }
 
 impl Rooms {
-    pub fn new(gk: Key, my_id: String) -> Self {
+    pub fn new(gk: Key, my_id: String, my_name: String) -> Self {
+        let my_name = sanitize_name(&my_name);
         let room_hex = global_room_hex(&gk);
-        Self { gk, my_id, room_hex, room: None }
+        Self { gk, my_id, my_name, room_hex, room: None }
     }
 
     pub fn my_id(&self) -> &str {
@@ -163,10 +168,19 @@ impl Rooms {
         self.room.as_ref().map(|st| st.role == Role::Host).unwrap_or(false)
     }
 
-    pub fn members(&self) -> Vec<String> {
+    pub fn members(&self) -> Vec<MemberInfo> {
         self.room
             .as_ref()
-            .map(|st| st.members.iter().cloned().collect())
+            .map(|st| {
+                st.members
+                    .iter()
+                    .map(|(peer, name)| MemberInfo {
+                        peer: peer.clone(),
+                        // Our own entry always carries OUR name.
+                        name: if peer == &self.my_id { self.my_name.clone() } else { name.clone() },
+                    })
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -197,11 +211,11 @@ impl Rooms {
     /// Restore a member list (from the contacts store) into a restored
     /// room, so fan-out works immediately after a restart. The host's
     /// authoritative list re-converges as guests re-join.
-    pub fn restore_members(&mut self, peers: Vec<String>) {
+    pub fn restore_members(&mut self, peers: Vec<(String, String)>) {
         if let Some(st) = self.room.as_mut() {
-            for p in peers {
+            for (p, name) in peers {
                 if p.parse::<PeerId>().is_ok() {
-                    st.members.insert(p);
+                    st.members.insert(p, name);
                 }
             }
         }
@@ -223,6 +237,7 @@ impl Rooms {
             guest_id: self.my_id.clone(),
             guest_nonce_b64: crypto::base64_encode(&gnonce),
             guest_proof_b64: crypto::base64_encode(&gproof),
+            name: self.my_name.clone(),
         }
     }
 
@@ -287,6 +302,7 @@ impl Rooms {
                 guest_id,
                 guest_nonce_b64,
                 guest_proof_b64,
+                name,
             } => {
                 if room_id_hex != self.room_hex {
                     out.push(RoomEvent::Send {
@@ -333,7 +349,7 @@ impl Rooms {
                     out.push(err(&format!("join GK proof failed from {from}")));
                     return out;
                 }
-                out.extend(self.admit(from));
+                out.extend(self.admit(from, &name));
             }
             Envelope::KeyDelivery {
                 room_id_hex,
@@ -378,7 +394,7 @@ impl Rooms {
                         st.members = list;
                         out.push(RoomEvent::MembersChanged {
                             room_id_hex: room_id_hex.clone(),
-                            members: st.members.iter().cloned().collect(),
+                            members: self.members(),
                         });
                         return out;
                     }
@@ -413,11 +429,11 @@ impl Rooms {
                             Ok(p) => {
                                 if let Some(st) = self.room.as_mut() {
                                     st.members = sanitize_members(p.members, &self.my_id);
-                                    out.push(RoomEvent::MembersChanged {
-                                        room_id_hex: room_hex,
-                                        members: st.members.iter().cloned().collect(),
-                                    });
                                 }
+                                out.push(RoomEvent::MembersChanged {
+                                    room_id_hex: room_hex,
+                                    members: self.members(),
+                                });
                             }
                             Err(e) => out.push(err(&format!("bad members payload: {e}"))),
                         }
@@ -488,9 +504,10 @@ impl Rooms {
         out
     }
 
-    /// Host: admit `guest` — record membership, deliver the key + member
-    /// list, and tell existing members about the newcomer.
-    fn admit(&mut self, guest: PeerId) -> Vec<RoomEvent> {
+    /// Host: admit `guest` — record membership (with their display
+    /// name), deliver the key + member list, and tell existing members
+    /// about the newcomer.
+    fn admit(&mut self, guest: PeerId, name: &str) -> Vec<RoomEvent> {
         let Some(st) = self.room.as_ref() else {
             return vec![err("admit: no room")];
         };
@@ -500,10 +517,10 @@ impl Rooms {
         let key = *st.crypto.room_key();
         let room_id: RoomId = st.crypto.room_id;
         let epoch = st.crypto.epoch;
-        let members: Vec<String> = {
+        let members: Vec<MemberInfo> = {
             let st = self.room.as_mut().unwrap();
-            st.members.insert(guest.to_string());
-            st.members.iter().cloned().collect()
+            st.members.insert(guest.to_string(), sanitize_name(name));
+            self.members()
         };
         let ct = crypto::seal_room_key(&self.gk, &room_id, &guest.to_string(), &key);
         let mut out = vec![
@@ -533,7 +550,8 @@ impl Rooms {
         if st.role != Role::Host || !st.has_key {
             return vec![];
         }
-        let payload = MembersPayload { members: st.members.iter().cloned().collect() };
+        let _ = st;
+        let payload = MembersPayload { members: self.members() };
         let body = serde_json::to_vec(&payload).expect("serialize members");
         // borrow gymnastics: seal needs &self.crypto, events need member ids
         let frame = {
@@ -546,7 +564,7 @@ impl Rooms {
             .as_ref()
             .unwrap()
             .members
-            .iter()
+            .keys()
             .filter_map(|m| m.parse().ok())
             .collect();
         peers
@@ -557,7 +575,7 @@ impl Rooms {
 
     /// The mesh send set: every member's PeerId.
     pub fn member_peers(&self) -> Vec<PeerId> {
-        self.members().iter().filter_map(|m| m.parse().ok()).collect()
+        self.members().iter().filter_map(|m| m.peer.parse().ok()).collect()
     }
 
     fn open_frame(
@@ -585,11 +603,26 @@ impl Rooms {
     }
 }
 
-/// Keep the list sane: dedup, always include ourselves, parseable only.
-fn sanitize_members(list: Vec<String>, my_id: &str) -> HashSet<String> {
-    let mut set: HashSet<String> = list.into_iter().filter(|m| m.parse::<PeerId>().is_ok()).collect();
-    set.insert(my_id.to_string());
-    set
+/// Keep the list sane: dedup, always include ourselves, parseable peers
+/// only, sanitized names.
+fn sanitize_members(list: Vec<MemberInfo>, my_id: &str) -> HashMap<String, String> {
+    let mut map: HashMap<String, String> = list
+        .into_iter()
+        .filter(|m| m.peer.parse::<PeerId>().is_ok() && m.peer != my_id)
+        .map(|m| (m.peer, sanitize_name(&m.name)))
+        .collect();
+    map.insert(my_id.to_string(), String::new());
+    map
+}
+
+/// Display names: trimmed, 32 chars max, no control characters.
+fn sanitize_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !c.is_control())
+        .take(32)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 /// Wall-clock seed for outgoing sequence numbers: strictly increasing

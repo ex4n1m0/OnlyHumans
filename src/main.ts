@@ -5,12 +5,13 @@ import { listen } from "@tauri-apps/api/event";
 
 interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number }
 interface Contact { peer_id: string; name: string }
+interface MemberInfo { peer: string; name: string }
 type NodeEvent =
   | { kind: "listening"; addr: string }
   | { kind: "joinStatus"; status: string }
   | { kind: "roomReady"; room: string; peer: string; weAreHost: boolean; epoch: number }
   | { kind: "message"; room: string; sender: string; body: string; epoch: number }
-  | { kind: "membersChanged"; room: string; members: string[] }
+  | { kind: "membersChanged"; room: string; members: MemberInfo[] }
   | { kind: "messagesCleared"; room: string }
   | { kind: "rotated"; room: string; newEpoch: number }
   | { kind: "connectionStateChanged"; peer: string; connected: boolean }
@@ -35,17 +36,77 @@ function fmtTime(ts: number): string {
 }
 
 async function main() {
+  // First-run gate: the room is only joined once a username exists.
+  const named: boolean = await invoke("has_username");
+  if (!named) {
+    renderGate();
+    return;
+  }
+  await boot();
+}
+
+function renderGate() {
+  layout.innerHTML = `
+    <div class="gate">
+      <div class="brand" style="justify-content:center">
+        <svg viewBox="0 0 44 44" style="width:40px;height:40px" aria-hidden="true">
+          <rect x="2" y="2" width="40" height="40" rx="10" fill="none" stroke="#17a2b8" stroke-width="2.5"/>
+          <circle cx="15" cy="15" r="3.6" fill="#17a2b8"/><circle cx="30" cy="17" r="3.6" fill="#17a2b8"/><circle cx="22" cy="31" r="3.6" fill="#17a2b8"/>
+          <path d="M17.6 16.4 L27.4 16.9 M16.6 18 20.5 28 M28.6 20 24 28.4" stroke="#17a2b8" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h2>Welcome to OnlyHumans</h2>
+      <p>Pick a name — the room will know you by it.</p>
+      <div class="gaterow">
+        <input id="name-input" placeholder="your name…" maxlength="32" spellcheck="false" autocomplete="off">
+        <button class="primary" id="name-go">Enter the room</button>
+      </div>
+      <p class="gatehint" id="gate-err"></p>
+    </div>`;
+  const input = document.getElementById("name-input") as HTMLInputElement;
+  input.focus();
+  const go = async () => {
+    const name = input.value.trim();
+    if (!name) {
+      document.getElementById("gate-err")!.textContent = "A name is required to continue.";
+      return;
+    }
+    try {
+      await invoke("set_username", { name });
+      await boot();
+    } catch (e) {
+      document.getElementById("gate-err")!.textContent = String(e);
+    }
+  };
+  document.getElementById("name-go")?.addEventListener("click", () => void go());
+  input.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter") void go();
+  });
+}
+
+async function boot() {
   const myId: string = await invoke("my_id");
   const contactNames = new Map<string, string>();
   for (const c of await invoke<Contact[]>("contacts")) contactNames.set(c.peer_id, c.name);
-  const displayName = (peer: string) => contactNames.get(peer) ?? short(peer);
+  const displayName = (peer: string) => {
+    const shared = members.find((m) => m.peer === peer)?.name ?? "";
+    return contactNames.get(peer) || shared || short(peer);
+  };
+  const memberLabel = (m: MemberInfo) => {
+    if (m.peer !== myId) {
+      return contactNames.get(m.peer) || m.name || short(m.peer);
+    }
+    // Our own name travels with the member list (sent on join).
+    const selfName = m.name || "you";
+    return selfName === "you" ? selfName : `${selfName} (you)`;
+  };
 
   let room: string | null = null;
   let isHost = false;
   let epoch = 1;
   let status = "connecting";
   let hostPeer = "";
-  let members: string[] = [];
+  let members: MemberInfo[] = [];
   let renamingPeer: string | null = null;
   let clearArmed = false;
   let clearTimer: number | undefined;
@@ -174,10 +235,10 @@ async function main() {
           </div>
           <ul>
             ${members.map((m) => `
-              <li data-peer="${m}" class="${m === hostPeer ? "ishost" : ""}" title="${m}">
-                <i class="dot ${m === myId || connectedPeers.has(m) ? "on" : "off"}"></i>
-                <span>${m === myId ? "you" : escapeHtml(displayName(m))}</span>
-                ${m === hostPeer ? '<span class="peer">host</span>' : ""}
+              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="${m.peer}">
+                <i class="dot ${m.peer === myId || connectedPeers.has(m.peer) ? "on" : "off"}"></i>
+                <span>${escapeHtml(memberLabel(m))}</span>
+                ${m.peer === hostPeer ? '<span class="peer">host</span>' : ""}
               </li>`).join("")}
           </ul>
         </div>

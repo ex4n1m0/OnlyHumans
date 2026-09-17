@@ -152,7 +152,7 @@ pub enum NodeEvent {
     JoinStatus { status: String },
     RoomReady { room: String, peer: String, we_are_host: bool, epoch: u64 },
     Message { room: String, sender: String, body: String, epoch: u64 },
-    MembersChanged { room: String, members: Vec<String> },
+    MembersChanged { room: String, members: Vec<crate::rooms::MemberInfo> },
     MessagesCleared { room: String },
     Rotated { room: String, new_epoch: u64 },
     ConnectionStateChanged { peer: String, connected: bool },
@@ -183,6 +183,8 @@ pub struct NodeConfig {
     /// Tests/offline: this peer is known to host the room; join it once
     /// connected (skips hub room-record discovery).
     pub room_host: Option<String>,
+    /// Display name shared with the room on join.
+    pub username: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -197,6 +199,7 @@ impl Default for NodeConfig {
             force_relay_hop: false,
             assume_host: false,
             room_host: None,
+            username: None,
         }
     }
 }
@@ -276,7 +279,11 @@ pub async fn spawn(
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(64);
 
-    let mut rooms = Rooms::new(crate::global_key(), identity.id_string());
+    let mut rooms = Rooms::new(
+        crate::global_key(),
+        identity.id_string(),
+        cfg.username.clone().unwrap_or_default(),
+    );
     let room_hex = rooms.room_hex().to_string();
 
     // Restore the room so chats and the key survive restarts.
@@ -294,7 +301,7 @@ pub async fn spawn(
                     // works immediately; the host's list re-converges as
                     // members re-join.
                     if let Ok(cs) = store.contacts() {
-                        rooms.restore_members(cs.into_iter().map(|c| c.peer_id).collect());
+                        rooms.restore_members(cs.into_iter().map(|c| (c.peer_id, c.name)).collect());
                     }
                 }
             }
@@ -671,6 +678,15 @@ async fn room_orchestration(
                 room: room_hex.to_string(),
                 members: rooms.members(),
             });
+            // A restored guest re-joins once per start: the host
+            // re-delivers the key with a fresh member list (display
+            // names otherwise drift after restarts) and any missed
+            // rotation is healed.
+            if !rooms.is_host() {
+                let host = st.host;
+                enqueue(outbox, host, rooms.join_envelope());
+                flush_outbox(swarm, outbox, host);
+            }
         }
         if !cfg.offline {
             for peer in rooms.member_peers() {
@@ -982,8 +998,8 @@ fn process_room_events(
             RoomEvent::MembersChanged { members, .. } => {
                 let mut s = store.lock().unwrap();
                 for m in members {
-                    if m != rooms.my_id() && !s.is_contact(m) {
-                        let _ = s.add_contact_if_absent(m);
+                    if m.peer != rooms.my_id() {
+                        let _ = s.set_shared_name(&m.peer, &m.name);
                     }
                 }
             }            _ => {}

@@ -167,6 +167,20 @@ impl Store {
             .map_err(Into::into)
     }
 
+    /// Store a room-shared display name for a peer, but never overwrite a
+    /// name the local user chose manually (manual renames are non-empty).
+    pub fn set_shared_name(&self, peer_id: &str, name: &str) -> anyhow::Result<()> {
+        self.conn
+            .execute(
+                "INSERT INTO contacts(peer_id, name) VALUES(?1, ?2)
+                 ON CONFLICT(peer_id) DO UPDATE SET name=excluded.name
+                 WHERE contacts.name=''",
+                params![peer_id, name],
+            )
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
     pub fn is_contact(&self, peer_id: &str) -> bool {
         self.conn
             .query_row(
