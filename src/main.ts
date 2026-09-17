@@ -290,6 +290,40 @@ async function boot() {
           </div>
           <div class="side-label">the room</div>
           ${ready ? `
+          <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}">
+            ${MAIN_ROOM_ICON}
+            <div class="rc-body">
+              <div class="rc-name">Main Room</div>
+              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · everyone</div>
+            </div>
+          </div>` : ""}
+          <div class="side-label plabel">private chats</div>
+          ${dms.size ? `<ul class="dm-list">
+            ${[...dms.entries()].map(([hex, dm]) => {
+              const name = displayName(dm.peer);
+              return `
+              <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${dm.peer}">
+                ${avatarHtml(dm.peer, name)}
+                <div class="li-body">
+                  <span class="mname">${escapeHtml(name)}</span>
+                  <span class="li-sub">${connectedPeers.has(dm.peer) ? "online" : "offline"}</span>
+                </div>
+              </li>`;}).join("")}
+          </ul>` : `<div class="side-hint">Click someone below to start a private chat.</div>`}
+          <div class="side-label">people in the room</div>
+          <ul class="member-list">
+            ${members.filter((m) => m.peer !== myId).map((m) => `
+              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="click for a private chat">
+                ${avatarHtml(m.peer, memberLabel(m))}
+                <div class="li-body">
+                  <span class="mname">${escapeHtml(memberLabel(m))}</span>
+                  <span class="li-sub">${m.peer === hostPeer ? "hosts the room" : (connectedPeers.has(m.peer) ? "online" : "offline")}</span>
+                </div>
+                <button class="rename-btn" data-peer="${m.peer}" title="rename">✎</button>
+              </li>`).join("")}
+          </ul>
+        </div>
+        ${ready ? `
         <div class="chat ${activeRoom === room ? "" : "dm"}">
           <div class="titlebar">
             ${activeRoom === room

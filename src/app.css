@@ -21,7 +21,7 @@ body {
   overflow: hidden;
 }
 #app { display: flex; flex-direction: column; }
-#layout { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+#layout { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 
 header {
   display: flex; align-items: center; gap: 10px;
@@ -37,10 +37,11 @@ header .myid {
 }
 header button { flex-shrink: 0; }
 
-main { flex: 1; display: flex; min-height: 0; }
+main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 .sidebar {
   width: 230px; background: var(--panel-2);
   border-right: 1px solid #1f3038; display: flex; flex-direction: column;
+  overflow: hidden; min-height: 0;
 }
 .sidebar .newchat { padding: 10px; border-bottom: 1px solid #1f3038; display: flex; gap: 6px; }
 .sidebar input { flex: 1; min-width: 0; }
@@ -87,7 +88,8 @@ main { flex: 1; display: flex; min-height: 0; }
 .sidebar .li-body .mname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .sidebar .li-body .li-sub { display: block; font-size: 10px; color: var(--muted); margin-top: 1px; }
 .sidebar .member-list li.ishost .avatar { outline: 2px solid var(--teal); outline-offset: 1px; }
-.sidebar .member-list { flex: 1; }
+.sidebar .member-list { flex: 1; min-height: 0; overflow-y: auto; }
+.sidebar .dm-list { flex-shrink: 0; }
 .sidebar li .mname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rename-btn { background: none; border: none; color: var(--muted); font-size: 11px; padding: 2px 4px; flex-shrink: 0; }
 .rename-btn:hover { color: var(--teal); }
@@ -95,7 +97,7 @@ main { flex: 1; display: flex; min-height: 0; }
 .sidebar li .dot.on { background: #2ecc71; }
 .sidebar li .dot.off { background: #6b4c50; }
 
-.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .chat .titlebar {
   padding: 10px 16px; background: var(--panel);
   border-bottom: 1px solid #1f3038; display: flex; gap: 12px; align-items: center;
@@ -127,7 +129,7 @@ main { flex: 1; display: flex; min-height: 0; }
   background: var(--bg); border: 1px solid #1f3038; color: inherit;
   border-radius: 6px; padding: 4px 8px; font-size: 12px; width: 160px;
 }
-.messages { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; }
+.messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; }
 .sender { font-size: 11px; font-weight: 600; margin: 6px 0 -3px 4px; align-self: flex-start; }
 .msg.out + .sender, .msg.in + .sender { margin-top: 8px; }
 .msg { max-width: 70%; padding: 7px 11px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
