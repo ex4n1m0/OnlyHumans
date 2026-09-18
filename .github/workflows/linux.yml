@@ -22,7 +22,13 @@ jobs:
             curl wget file libxdo-dev libssl-dev \
             libayatana-appindicator3-dev librsvg2-dev
       - name: Core test suite on Linux
-        run: cargo test -p onlyhumans_core
+        run: |
+          set -o pipefail
+          if ! cargo test -p onlyhumans_core 2>&1 | tee /tmp/test.log; then
+            grep -E 'FAILED|panicked at|^error|error\[|test result' /tmp/test.log | head -40 \
+              | sed 's/^/::error::/'
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
