@@ -468,10 +468,17 @@ async function boot() {
     // be swapped mid-session, so saving restarts the app.
     document.getElementById("room-code")?.addEventListener("click", (e) => {
       e.stopPropagation();
+      if (editingCode) {
+        document.getElementById("code-edit-input")?.focus();
+        return;
+      }
       editingCode = true;
       render();
     });
-    if (editingCode) {
+    // The editor lives in the toast layer, which render() never clears —
+    // append it only once per open, or every re-render (connection and
+    // member events fire them) stacks duplicate identical editors.
+    if (editingCode && !document.getElementById("code-edit-input")) {
       const box = ensureToasts();
       const t = document.createElement("div");
       t.className = "toast";
@@ -530,12 +537,16 @@ async function boot() {
     document.querySelectorAll<HTMLElement>(".rename-btn").forEach((b) => {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
+        // Drop an editor opened for a different peer (or a stray one left
+        // by an older render) so exactly one overlay exists.
+        (document.getElementById("rename-input")?.closest(".toast") as HTMLElement | null)?.remove();
         renamingPeer = b.dataset.peer ?? null;
         render();
       });
     });
-    if (renamingPeer) {
-      // Renaming overlay lives in the toast layer (outside #layout).
+    if (renamingPeer && !document.getElementById("rename-input")) {
+      // Renaming overlay lives in the toast layer (outside #layout), which
+      // render() never clears — guard the append like the code editor.
       const box = ensureToasts();
       const t = document.createElement("div");
       t.className = "toast";
