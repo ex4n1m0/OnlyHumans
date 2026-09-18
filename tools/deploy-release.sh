@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Ship a release. Every deployment bumps the patch version, rebuilds with
+# the release-channel global key, prunes older artifacts from the download
+# dir (one file per platform — prior versions are leftovers, they get
+# deleted) and regenerates ohpub/version.json to match what is shipped.
+#
+#   . tools/deploy-release.sh                  # bump + build + publish
+#   OH_NO_BUMP=1 . tools/deploy-release.sh     # re-ship the same version
+#   OH_PUB=/path/to/ohpub . tools/...          # non-default site root
+#
+# Platform-aware: run it on Windows (Git Bash) to ship the NSIS installer,
+# from WSL to ship deb/AppImage. Blocks for platforms not built in this
+# run keep their existing version.json entries.
+set -euo pipefail
+cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
+OH_PUB="${OH_PUB:-$(cd .. && pwd)/ohpub}"
+
+if [ ! -d "$OH_PUB/download" ]; then
+  echo "download dir '$OH_PUB/download' not found — set OH_PUB." >&2
+  exit 1
+fi
+
+# --- 1. bump the patch version in tauri.conf, both crates, npm package ---
+cur=$(node -p 'require("./src-tauri/tauri.conf.json").version')
+if [ "${OH_NO_BUMP:-0}" = "1" ]; then
+  new="$cur"
+else
+  new=$(node -p 'process.argv[1].replace(/(\d+)$/, m => String(+m + 1))' "$cur")
+fi
+echo "deploy: version $cur -> $new"
+node -e '
+  const fs = require("fs");
+  const f = "src-tauri/tauri.conf.json";
+  const c = JSON.parse(fs.readFileSync(f, "utf8"));
+  c.version = process.argv[1];
+  fs.writeFileSync(f, JSON.stringify(c, null, 2) + "\n");
+' "$new"
+sed -i "s/^version = \"$cur\"/version = \"$new\"/" src-tauri/Cargo.toml core/Cargo.toml
+npm version "$new" --no-git-tag-version --allow-same-version >/dev/null
+
+# --- 2. build with the release-channel key (release-build.sh ritual) -----
+. ./tools/release-build.sh
+BUNDLE_DIR="target/release/bundle"
+DL="$OH_PUB/download"
+
+# --- 3. ship fresh artifacts ----------------------------------------------
+# tauri emits OnlyHumans_<ver>_x64-setup.exe; the site has always linked
+# the flatter OnlyHumans-Setup-<ver>.exe — keep that public name. Match the
+# exact version: older bundles linger in the bundle dir and a glob would
+# feed cp two sources.
+cp -f "$BUNDLE_DIR"/nsis/OnlyHumans_"$new"_x64-setup.exe "$DL/OnlyHumans-Setup-$new.exe" ||
+  echo "no NSIS bundle in this run (linux host?) — windows entry unchanged"
+cp -f "$BUNDLE_DIR"/deb/*.deb "$DL"/ 2>/dev/null || true
+cp -f "$BUNDLE_DIR"/appimage/*.AppImage "$DL"/ 2>/dev/null || true
+
+# --- 4. prune older artifacts: keep the newest of each platform family ----
+# Runs AFTER the copy so the file this deploy just superseded also goes.
+prune() {
+  find "$DL" -maxdepth 1 -name "$1" -printf '%f\n' | sort -V | head -n -1 |
+    while read -r f; do rm -f "$DL/$f"; done
+}
+prune 'OnlyHumans-Setup-*.exe'
+prune 'OnlyHumans_*_amd64.AppImage'
+prune 'OnlyHumans_*_amd64.deb'
+
+node tools/gen-version-json.js "$OH_PUB" "$new" "$(date +%F)"
+echo "deploy: shipped to $DL"
