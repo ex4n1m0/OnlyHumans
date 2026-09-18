@@ -11,61 +11,35 @@ pub mod store;
 /// Public release-channel identifier (16 bytes, committed). Same for every
 /// clone, but by itself it derives nothing useful — the room key domain
 /// also needs the channel secret, which exists only in release builds.
+#[cfg(test)]
 static GK_CHANNEL: &[u8] = include_bytes!("gk_channel.bin");
 
 /// The community global key.
 ///
-/// GK = SHA-256("OH1-gk-v2|" | channel | secret) where the secret comes
-/// from exactly one of:
-///  * release builds: `OH_GK_A` / `OH_GK_B` compile-time env vars — two
-///    XOR shares of the channel secret, so no contiguous key blob exists
-///    in the source tree or the binary;
+/// GK = SHA-256("OH1-gk-v2|" | channel | secret). The whole derivation
+/// runs in build.rs, which resolves the secret from exactly one of:
+///  * release builds: `OH_GK_A` / `OH_GK_B` env vars — two XOR shares of
+///    the channel secret;
+///  * `OH_GLOBAL_KEY` (raw hex) as a build-time override;
 ///  * everyone else (fresh clones, CI, dev): a per-clone random secret in
 ///    the gitignored `secrets/local-gk.key`, auto-generated on first
 ///    build — every clone gets its own global key and therefore its own
 ///    room, and can never join a release-channel room.
 ///
-/// `OH_GLOBAL_KEY` (raw hex) remains as a build-time override.
+/// build.rs writes the finished 32 raw key bytes to OUT_DIR/gk.bin and
+/// this function embeds them. The share/env hex values never become
+/// string literals in the compiled binary (deriving here via `option_env!`
+/// did exactly that on targets where the optimizer keeps the literals in
+/// .rodata). Carrying the 32 key bytes is the intended barrier: getting
+/// the community key out of a shipped binary requires scheme-aware
+/// analysis, not `strings`.
 pub fn global_key() -> crypto::Key {
-    const DOMAIN: &[u8] = b"OH1-gk-v2|";
-
-    let secret: [u8; 32] = if let Some(hexstr) = option_env!("OH_GLOBAL_KEY") {
-        let mut k = crypto::Key::default();
-        let raw = hex::decode(hexstr).expect("OH_GLOBAL_KEY must be hex");
-        assert!(raw.len() == 32, "OH_GLOBAL_KEY must be 32 bytes");
-        k.copy_from_slice(&raw);
-        k
-    } else if let (Some(a), Some(b)) = (option_env!("OH_GK_A"), option_env!("OH_GK_B")) {
-        let a = hex::decode(a).expect("OH_GK_A must be hex");
-        let b = hex::decode(b).expect("OH_GK_B must be hex");
-        let s = derive_gk_secret(&a, &b);
-        let mut k = crypto::Key::default();
-        k.copy_from_slice(&s);
-        k
-    } else {
-        // Per-clone local secret; build.rs guarantees the file exists.
-        let raw: Vec<u8> = include_bytes!("../../secrets/local-gk.key").to_vec();
-        let mut k = crypto::Key::default();
-        assert!(raw.len() == 32, "local-gk.key must be 32 bytes");
-        k.copy_from_slice(&raw);
-        k
-    };
-
-    derive_gk(GK_CHANNEL, &secret)
+    *include_bytes!(concat!(env!("OUT_DIR"), "/gk.bin"))
 }
 
-/// Recombine the two release shares into the channel secret. The shares
-/// are scattered constants in the binary; the secret itself exists only
-/// in registers/heap at runtime.
-fn derive_gk_secret(a: &[u8], b: &[u8]) -> [u8; 32] {
-    assert!(a.len() == 32 && b.len() == 32, "GK shares must be 32 bytes");
-    let mut out = [0u8; 32];
-    for i in 0..32 {
-        out[i] = a[i] ^ b[i];
-    }
-    out
-}
-
+/// Test-only mirror of the build.rs derivation (same formula), so unit
+/// tests can prove channel/secret isolation properties.
+#[cfg(test)]
 fn derive_gk(channel: &[u8], secret: &[u8; 32]) -> crypto::Key {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -75,6 +49,17 @@ fn derive_gk(channel: &[u8], secret: &[u8; 32]) -> crypto::Key {
     let mut k = crypto::Key::default();
     k.copy_from_slice(&h.finalize());
     k
+}
+
+/// Test-only XOR recombination, mirroring build.rs.
+#[cfg(test)]
+fn derive_gk_secret(a: &[u8], b: &[u8]) -> [u8; 32] {
+    assert!(a.len() == 32 && b.len() == 32, "GK shares must be 32 bytes");
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        out[i] = a[i] ^ b[i];
+    }
+    out
 }
 
 #[cfg(test)]
