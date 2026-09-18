@@ -140,8 +140,7 @@ async function boot() {
   let editingCode = false;
   let clearArmed = false;
   let clearTimer: number | undefined;
-  let rotateArmed = false;
-  let rotateTimer: number | undefined;
+  let rotateModalOpen = false;
   // True when this profile started with a room code: the app then lives
   // in the code's room universe instead of the main room.
   const codeRoom: boolean = await invoke("has_passcode");
@@ -157,6 +156,10 @@ async function boot() {
     document.querySelectorAll<HTMLElement>(".live-status")
       .forEach((el) => (el.textContent = statusLine()));
   }, 1000);
+
+  document.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Escape" && rotateModalOpen) closeRotateModal();
+  });
 
   render();
   await invoke("request_state").catch(() => {});
@@ -274,8 +277,14 @@ async function boot() {
       case "connected": return `connected · ${displayName(hostPeer)} hosts`;
       case "joining": return `joining the room… ${secs}s`;
       case "founding": return "creating the room (first member)…";
+      case "sealed": return "room closed by key rotation";
       default: return `looking for the room… ${secs}s`;
     }
+  }
+
+  function closeRotateModal() {
+    rotateModalOpen = false;
+    render();
   }
 
   function toast(text: string) {
@@ -375,7 +384,7 @@ async function boot() {
                    <div class="tb-sub">${statusLine()} · key epoch ${epoch}</div>
                  </div>
                  <div class="tb-actions">
-                   ${isHost ? `<button id="rotate" class="${rotateArmed ? "danger" : ""}" title="cut over to a new key — anyone offline must rejoin to read new messages">${rotateArmed ? "Really rotate?" : "Rotate key"}</button>` : ""}
+                   ${isHost ? '<button id="rotate" title="new key — closes the room to newcomers forever">Rotate key</button>' : ""}
                    <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
                      ${clearArmed ? "Really clear?" : "Clear history"}
                    </button>
@@ -413,8 +422,26 @@ async function boot() {
             <input id="send-text" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" autocomplete="off" ${ready ? "" : "disabled"}>
             <button class="primary" id="send">Send</button>
           </div>
-        </div>` : `<div class="empty"><div class="join-progress"><span class="spin"></span><span class="live-status">${statusLine()}</span></div>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "Nobody has answered the hub yet — if no host appears within a minute, this device creates the room."}</div>`}
-      </main>`;
+        </div>` : `<div class="empty">${status === "sealed"
+            ? `<div class="join-progress"><span class="live-status">${statusLine()}</span></div>This room's key was rotated by its members — only the people who were inside keep access, and no one new can get in. To enter a different room, log off and use its code word.`
+            : `<div class="join-progress"><span class="spin"></span><span class="live-status">${statusLine()}</span></div>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "Nobody has answered the hub yet — if no host appears within a minute, this device creates the room."}`}</div>`}
+      </main>
+      ${rotateModalOpen ? `
+      <div class="modal-backdrop" id="rotate-backdrop">
+        <div class="modal">
+          <h3>Rotate the room key?</h3>
+          <p>The key changes now and travels only to the people already
+          inside. From that moment the room is <b>closed to newcomers,
+          forever</b>: for a room without a code word, no one who is not in
+          it now will ever be able to get in — and a room code stops
+          opening this room too. Members who are offline keep their seat
+          and receive the new key when they return.</p>
+          <div class="actions">
+            <button id="rotate-cancel">Cancel</button>
+            <button id="rotate-confirm" class="primary">Rotate now</button>
+          </div>
+        </div>
+      </div>` : ""}`;
 
     (document.getElementById("msgs") as HTMLElement | null)?.scrollTo(0, 1e9);
 
@@ -549,23 +576,19 @@ async function boot() {
     document.getElementById("send-text")?.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") sendCurrent();
     });
-    document.getElementById("rotate")?.addEventListener("click", async () => {
-      if (!rotateArmed) {
-        // Irreversible for anyone offline at switch-over: the new key only
-        // travels to members reachable now; they must rejoin to catch up.
-        rotateArmed = true;
-        render();
-        toast("Rotating cuts the key over NOW — anyone offline misses the switch and must rejoin before they can read new messages. Click again to confirm.");
-        rotateTimer = window.setTimeout(() => {
-          rotateArmed = false;
-          render();
-        }, 8000);
-        return;
-      }
-      window.clearTimeout(rotateTimer);
-      rotateArmed = false;
-      await invoke("rotate_key");
-      toast("Key rotated — new key sent to current members only");
+    document.getElementById("rotate")?.addEventListener("click", () => {
+      rotateModalOpen = true;
+      render();
+    });
+    document.getElementById("rotate-cancel")?.addEventListener("click", closeRotateModal);
+    document.getElementById("rotate-backdrop")?.addEventListener("click", (e) => {
+      if (e.target === e.currentTarget) closeRotateModal();
+    });
+    document.getElementById("rotate-confirm")?.addEventListener("click", async () => {
+      rotateModalOpen = false;
+      await invoke("rotate_key").catch((e) => toast(String(e)));
+      toast("Key rotated — the room is now closed to newcomers; current members keep their seats");
+      render();
     });
 
     document.getElementById("new-room")?.addEventListener("click", () => {

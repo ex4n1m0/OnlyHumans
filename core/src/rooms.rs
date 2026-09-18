@@ -126,6 +126,10 @@ pub struct Rooms {
     room_hex: String,
     room: Option<RoomState>,
     dms: HashMap<String, DmRoom>,
+    /// Our join was refused because the room is sealed (rotated under a
+    /// key we never held). Session latch: stops the join retry loop and
+    /// tells the UI the door is closed.
+    pub sealed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -142,6 +146,9 @@ pub enum RoomEvent {
     MessagesCleared { room_id_hex: String },
     /// A key rotation was applied.
     Rotated { room_id_hex: String, new_epoch: u64 },
+    /// The host refused our join: the room was sealed by a key rotation
+    /// and we are not one of its members.
+    Sealed,
     ProtocolError { context: String },
 }
 
@@ -202,7 +209,7 @@ impl Rooms {
     pub fn new(gk: Key, my_id: String, my_name: String) -> Self {
         let my_name = sanitize_name(&my_name);
         let room_hex = global_room_hex(&gk);
-        Self { gk, my_id, my_name, room_hex, room: None, dms: HashMap::new() }
+        Self { gk, my_id, my_name, room_hex, room: None, dms: HashMap::new(), sealed: false }
     }
 
     pub fn my_id(&self) -> &str {
@@ -457,6 +464,22 @@ impl Rooms {
                     out.push(err(&format!("join GK proof failed from {from}")));
                     return out;
                 }
+                // The first rotation seals the room. Rotation frames travel
+                // only under the current key, so from epoch 2 onward the
+                // membership is closed: a valid GK proof no longer mints a
+                // seat. People already on the member list (restarts,
+                // returns after a missed rotation) still re-join freely.
+                if let Some(st) = self.room.as_ref() {
+                    if st.crypto.epoch > 1 && !st.members.contains_key(&from.to_string()) {
+                        out.push(RoomEvent::Send {
+                            peer: from,
+                            envelope: Envelope::Error {
+                                message: "room-sealed: the room key was rotated — only current members keep access".into(),
+                            },
+                        });
+                        return out;
+                    }
+                }
                 out.extend(self.admit(from, &name));
             }
             Envelope::KeyDelivery {
@@ -680,6 +703,13 @@ impl Rooms {
                         });
                     }
                 }
+                // Our join was refused because the room rotated under a key
+                // we never held: latch it so the join retry loop stops and
+                // the UI can say why.
+                if message.starts_with("room-sealed") {
+                    self.sealed = true;
+                    out.push(RoomEvent::Sealed);
+                }
             }
         }
         out
@@ -879,5 +909,90 @@ mod passcode_tests {
             effective_gk(&other_base, Some("lair")),
             effective_gk(&base, Some("lair"))
         );
+    }
+}
+
+#[cfg(test)]
+mod seal_tests {
+    use super::*;
+    use libp2p::identity::Keypair;
+    use std::str::FromStr;
+
+    fn gk() -> Key {
+        [7u8; 32]
+    }
+
+    fn node(name: &str) -> (Rooms, PeerId) {
+        let pid = Keypair::generate_ed25519().public().to_peer_id();
+        (Rooms::new(gk(), pid.to_string(), name.into()), pid)
+    }
+
+    /// First Error envelope the host would send back, if any.
+    fn sent_error(events: &[RoomEvent]) -> Option<String> {
+        events.iter().find_map(|ev| match ev {
+            RoomEvent::Send { envelope: Envelope::Error { message }, .. } => Some(message.clone()),
+            _ => None,
+        })
+    }
+
+    fn delivered_key(events: &[RoomEvent]) -> Option<u64> {
+        events.iter().find_map(|ev| match ev {
+            RoomEvent::Send { envelope: Envelope::KeyDelivery { epoch, .. }, .. } => Some(*epoch),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn rotation_seals_the_room_to_strangers() {
+        let (mut host, _hpid) = node("host");
+        host.become_host(None, 1);
+        assert!(host.rotate().is_some()); // epoch 2 — the door closes
+
+        let (mut stranger, spid) = node("stranger");
+        let events = host.handle(spid, stranger.join_envelope());
+        let err = sent_error(&events).expect("stranger must be refused");
+        assert!(err.starts_with("room-sealed"), "got: {err}");
+        assert!(delivered_key(&events).is_none(), "no key may leak to a stranger");
+        assert!(stranger.sealed == false); // latch flips on the GUEST side, below
+    }
+
+    #[test]
+    fn sealed_guest_latches_on_refusal() {
+        let (mut host, _hpid) = node("host");
+        host.become_host(None, 1);
+        assert!(host.rotate().is_some());
+
+        let (mut guest, gpid) = node("guest");
+        // Guest receives the host's refusal the transport would deliver.
+        let refusal = Envelope::Error {
+            message: "room-sealed: the room key was rotated — only current members keep access".into(),
+        };
+        let events = guest.handle(host_id(&host), refusal);
+        assert!(matches!(events.as_slice(), [RoomEvent::Sealed]));
+        assert!(guest.sealed, "join retry loop must stop");
+    }
+
+    #[test]
+    fn members_still_rejoin_after_rotation() {
+        let (mut host, hpid) = node("host");
+        host.become_host(None, 1);
+
+        // A member joins at epoch 1, then the host rotates.
+        let (mut member, mpid) = node("member");
+        let events = host.handle(mpid, member.join_envelope());
+        assert_eq!(delivered_key(&events), Some(1), "member must be admitted");
+
+        assert!(host.rotate().is_some()); // epoch 2
+
+        // The member restarts / missed the rotation: their re-join (valid
+        // GK proof, already on the member list) must still be admitted.
+        let events = host.handle(mpid, member.join_envelope());
+        assert!(sent_error(&events).is_none(), "member re-join must not be refused");
+        assert_eq!(delivered_key(&events), Some(2), "member gets the current key");
+        let _ = hpid;
+    }
+
+    fn host_id(host: &Rooms) -> PeerId {
+        PeerId::from_str(&host.my_id).expect("valid peer id")
     }
 }

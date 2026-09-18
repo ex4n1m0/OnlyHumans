@@ -754,6 +754,12 @@ async fn room_orchestration(
         return;
     }
 
+    // Sealed: the host told us the room rotated under a key we never held.
+    // Don't re-attempt joins (or found a fork) — the UI shows why.
+    if rooms.sealed {
+        return;
+    }
+
     // Online: consult the room record. This is both join discovery and
     // the "first to join creates the room" election.
     match hub.lookup_room(room_hex).await {
@@ -1088,6 +1094,9 @@ fn dispatch_room_event(
         }
         RoomEvent::ProtocolError { context } => {
             let _ = event_tx.send(NodeEvent::Log { message: context });
+        }
+        RoomEvent::Sealed => {
+            let _ = event_tx.send(NodeEvent::JoinStatus { status: "sealed".into() });
         }
     }
     let _ = from;
