@@ -72,7 +72,10 @@ impl HubClient {
         }
     }
 
-    pub async fn register(&self, id: &Identity, addrs: Vec<String>) -> anyhow::Result<()> {
+    /// Register our addresses. Returns the public IP the hub OBSERVED on
+    /// its HTTPS socket (mini-STUN) when it reports one — advisory data
+    /// from the response, never stored server-side.
+    pub async fn register(&self, id: &Identity, addrs: Vec<String>) -> anyhow::Result<Option<String>> {
         let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let pub_b64 = crate::crypto::base64_encode(&id.public_key_bytes());
         let canon = canonical(&id.id_string(), &pub_b64, &addrs, ts_ms);
@@ -93,7 +96,15 @@ impl HubClient {
         if !resp.status().is_success() {
             anyhow::bail!("hub register failed: {} {}", resp.status(), resp.text().await.unwrap_or_default());
         }
-        Ok(())
+        #[derive(serde::Deserialize, Default)]
+        struct RegResp {
+            #[serde(default)]
+            observed_ip: Option<String>,
+            #[serde(rename = "observedIp", default)]
+            observed_ip_camel: Option<String>,
+        }
+        let r: RegResp = resp.json().await.unwrap_or_default();
+        Ok(r.observed_ip.or(r.observed_ip_camel).filter(|s| !s.trim().is_empty()))
     }
 
     /// Look up a peer; returns None if unknown/expired. Signatures are

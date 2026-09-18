@@ -195,6 +195,9 @@ pub struct NodeConfig {
     /// parallel room universe from (GK, word) instead of joining the
     /// main room. Same word + same binary -> same room.
     pub passcode: Option<String>,
+    /// Public address (IP or DNS name) to publish FIRST for port-forwarded
+    /// hosts — the one address peers behind other NATs can dial.
+    pub public_addr: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -211,6 +214,7 @@ impl Default for NodeConfig {
             room_host: None,
             username: None,
             passcode: None,
+            public_addr: None,
         }
     }
 }
@@ -331,6 +335,9 @@ pub async fn spawn(
     let mut host_record_ok = false;
     let mut grace_left: Option<u32> = if cfg.assume_host { Some(0) } else { Some(12) };
     let mut announced = false;
+    // Public IP the hub observed for us (mini-STUN); captured on one
+    // registration cycle, published as a same-port guess on the next.
+    let mut observed_ip: Option<std::net::Ipv4Addr> = None;
 
     // The interval's first tick races listener binding, so retry fast until
     // the first successful registration, then refresh on the slow cadence.
@@ -383,7 +390,7 @@ pub async fn spawn(
                     ).await;
                 }
                 _ = hub_fast.tick(), if !cfg.offline && !hub_registered => {
-                    match register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs).await {
+                    match register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), &mut observed_ip).await {
                         Ok(()) => {
                             hub_registered = true;
                             // The slow interval's immediate first tick would
@@ -398,7 +405,7 @@ pub async fn spawn(
                     }
                 }
                 _ = hub_interval.tick(), if !cfg.offline && hub_registered => {
-                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs).await {
+                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), &mut observed_ip).await {
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
                     // Hosts refresh their room record alongside addresses
@@ -525,30 +532,102 @@ async fn register_with_hub(
     identity: &Identity,
     hub: &HubClient,
     circuit_addrs: &[Multiaddr],
+    public_addr: Option<&str>,
+    observed_ip: &mut Option<std::net::Ipv4Addr>,
 ) -> anyhow::Result<()> {
     let my_ip = default_route_ip();
-    let mut addrs = Vec::new();
+    let mut addrs: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    fn push(addrs: &mut Vec<String>, seen: &mut std::collections::HashSet<String>, ma: Multiaddr) {
+        let s = ma.to_string();
+        if seen.insert(s.clone()) {
+            addrs.push(s);
+        }
+    }
+    // Ports of our QUIC/TCP listeners, reused for the public guesses below.
+    let mut quic_port: Option<u16> = None;
+    let mut tcp_port: Option<u16> = None;
+    let mut local: Vec<Multiaddr> = Vec::new();
     for l in swarm.listeners() {
-        // Rewrite 0.0.0.0 placeholders to our best local address.
+        // Rewrite 0.0.0.0 placeholders to our best local address; skip
+        // loopback entirely — a remote peer can never dial it.
         let components: Vec<libp2p::multiaddr::Protocol<'_>> = l.iter().collect();
         let mut ma = Multiaddr::empty();
+        let mut skip = false;
         for c in components {
             match c {
                 Protocol::Ip4(ip) if ip.is_unspecified() => {
                     ma.push(Protocol::from(my_ip));
                 }
+                Protocol::Ip4(ip) if ip.is_loopback() => skip = true,
+                Protocol::Udp(p) => {
+                    quic_port = Some(p);
+                    ma.push(Protocol::Udp(p));
+                }
+                Protocol::Tcp(p) => {
+                    tcp_port = Some(p);
+                    ma.push(Protocol::Tcp(p));
+                }
                 other => ma.push(other),
             }
         }
-        addrs.push(ma.to_string());
+        if !skip {
+            local.push(ma);
+        }
+    }
+
+    // Explicit public address (port-forwarded hosts) goes FIRST — it is
+    // the one address a peer behind another NAT can actually dial.
+    if let Some(pa) = public_addr.map(str::trim).filter(|s| !s.is_empty()) {
+        let host = pa.trim_start_matches("//").split(':').next().unwrap_or("").to_string();
+        if !host.is_empty() {
+            let host_proto = host
+                .parse::<std::net::Ipv4Addr>()
+                .ok()
+                .map(Protocol::from)
+                .unwrap_or_else(|| Protocol::Dns4(host.clone().into()));
+            if let Some(p) = quic_port {
+                push(&mut addrs, &mut seen, Multiaddr::empty().with(host_proto.clone()).with(Protocol::Udp(p)).with(Protocol::QuicV1));
+            }
+            if let Some(p) = tcp_port {
+                push(&mut addrs, &mut seen, Multiaddr::empty().with(host_proto).with(Protocol::Tcp(p)));
+            }
+        }
+    }
+    for ma in local {
+        push(&mut addrs, &mut seen, ma);
     }
     for c in circuit_addrs {
-        addrs.push(c.to_string());
+        push(&mut addrs, &mut seen, c.clone());
+    }
+    // Mini-STUN: on a PREVIOUS registration the hub told us the public IP
+    // our HTTPS socket came from. That socket is not our QUIC/TCP
+    // listener, so the port mapping through the NAT is a GUESS (same
+    // port) — full-cone NATs accept inbound on an existing mapping and
+    // peers re-dial every few seconds, so it is worth publishing and
+    // costs nothing when wrong. The reg endpoint rate-limits to one
+    // write per 30s, so the guess rides the NEXT registration cycle
+    // (120s) rather than an immediate second PUT.
+    if let Some(ip) = *observed_ip {
+        if let Some(p) = quic_port {
+            push(&mut addrs, &mut seen, Multiaddr::empty().with(Protocol::from(ip)).with(Protocol::Udp(p)).with(Protocol::QuicV1));
+        }
+        if let Some(p) = tcp_port {
+            push(&mut addrs, &mut seen, Multiaddr::empty().with(Protocol::from(ip)).with(Protocol::Tcp(p)));
+        }
     }
     if addrs.is_empty() {
         anyhow::bail!("no listening addresses yet");
     }
-    hub.register(identity, addrs).await
+    let observed = hub.register(identity, addrs).await?;
+    if let Some(ip) = observed.as_deref().and_then(|s| s.trim().parse::<std::net::Ipv4Addr>().ok()) {
+        let o = ip.octets();
+        let link_local = o[0] == 169 && o[1] == 254; // 169.254.0.0/16
+        if !ip.is_private() && !ip.is_loopback() && !link_local {
+            *observed_ip = Some(ip);
+        }
+    }
+    Ok(())
 }
 
 fn circuit_addrs_contain(list: &[Multiaddr], addr: &Multiaddr) -> bool {

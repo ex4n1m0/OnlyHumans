@@ -187,12 +187,26 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
             app_handle.try_state::<AppState>().map(|s| s.my_id.clone()).unwrap_or_default()
         ),
     );
-    let cfg = NodeConfig {
+    // Port-forward escape hatch for NAT-to-NAT dead ends: a fixed listen
+    // port plus the forwarded public address make this machine directly
+    // dialable (publish it on the hub ahead of the LAN addresses).
+    //   OH_LISTEN_PORT=42333  (bind QUIC+TCP on one fixed port)
+    //   OH_PUBLIC_ADDR=203.0.113.7  (or a DNS name; published first)
+    let mut cfg = NodeConfig {
         data_dir: dir,
         username: Some(username),
         passcode,
         ..Default::default()
     };
+    if let Some(port) = std::env::var("OH_LISTEN_PORT").ok().and_then(|p| p.trim().parse().ok()) {
+        cfg.listen_quic = Some(port);
+        cfg.listen_tcp = Some(port);
+    }
+    if let Some(pa) = std::env::var("OH_PUBLIC_ADDR").ok().map(|s| s.trim().to_string()) {
+        if !pa.is_empty() {
+            cfg.public_addr = Some(pa);
+        }
+    }
     tauri::async_runtime::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let node = match spawn(cfg, tx).await {

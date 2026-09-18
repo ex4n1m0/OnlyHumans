@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
 
     println!("peer id : {}", id.id_string());
     println!("registering at the live hub...");
-    hub.register(&id, addrs.clone()).await?;
+    let _observed = hub.register(&id, addrs.clone()).await?;
     println!("register: OK (hub verified our signature)");
 
     let got = hub.lookup(&id.id_string()).await?;
