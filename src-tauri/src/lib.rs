@@ -27,6 +27,7 @@ async fn set_username(
     app: AppHandle,
     state: State<'_, AppState>,
     name: String,
+    passcode: Option<String>,
 ) -> Result<(), String> {
     let name: String = name.chars().filter(|c| !c.is_control()).take(32).collect();
     let name = name.trim().to_string();
@@ -36,12 +37,50 @@ async fn set_username(
     let dir = resolve_dir(&app).ok_or("no data dir")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("username.txt"), &name).map_err(|e| e.to_string())?;
+    let passcode = write_passcode(&dir, passcode.as_deref())?;
     // Idempotent: if the node is already running the name applies from the
     // next join/re-join; otherwise start it now.
     if state.node.lock().unwrap().is_none() {
-        start_node(app, dir, name);
+        start_node(app, dir, name, passcode);
     }
     Ok(())
+}
+
+/// Store (or clear, when blank) the room passcode. Returns the value to
+/// feed the node: normalized lowercase, None when it addresses the main
+/// room. Mirrors the core's `normalize_passcode` so both layers fold the
+/// word identically.
+fn write_passcode(dir: &std::path::Path, word: Option<&str>) -> Result<Option<String>, String> {
+    let word = word.unwrap_or("").trim().to_lowercase();
+    if word.is_empty() {
+        let _ = std::fs::remove_file(dir.join("passcode.txt"));
+        Ok(None)
+    } else {
+        std::fs::write(dir.join("passcode.txt"), &word).map_err(|e| e.to_string())?;
+        Ok(Some(word))
+    }
+}
+
+fn read_passcode(dir: &std::path::Path) -> Option<String> {
+    let raw = std::fs::read_to_string(dir.join("passcode.txt")).ok()?;
+    let word = raw.trim().to_lowercase();
+    if word.is_empty() { None } else { Some(word) }
+}
+
+#[tauri::command]
+fn has_passcode(app: AppHandle) -> bool {
+    resolve_dir(&app).map(|d| read_passcode(&d).is_some()).unwrap_or(false)
+}
+
+/// Change or clear the room passcode for an ALREADY-running profile.
+/// Rooms can't be swapped mid-session (the whole node keys off the
+/// effective GK), so this persists the word and restarts the app, which
+/// rejoins the addressed room with restored history.
+#[tauri::command]
+fn set_passcode(app: AppHandle, word: Option<String>) -> Result<(), String> {
+    let dir = resolve_dir(&app).ok_or("no data dir")?;
+    write_passcode(&dir, word.as_deref())?;
+    app.restart(); // does not return
 }
 
 fn resolve_dir(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -64,7 +103,7 @@ fn read_username(dir: &std::path::Path) -> Option<String> {
 
 /// Spawn the core node + event pump. Called at startup when a username
 /// already exists, or from `set_username` after the first-run gate.
-fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String) {
+fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, passcode: Option<String>) {
     // Diagnostics for shipped builds: everything else only reaches
     // eprintln/WebView console, which release users cannot see.
     let log_dir = dir.join("logs");
@@ -79,6 +118,7 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String) 
     let cfg = NodeConfig {
         data_dir: dir,
         username: Some(username),
+        passcode,
         ..Default::default()
     };
     tauri::async_runtime::spawn(async move {
@@ -387,7 +427,8 @@ pub fn run() {
             // The node only starts once a username exists (the UI gates
             // first-run on it); returning members start immediately.
             if let Some(name) = read_username(&dir) {
-                start_node(app_handle, dir, name);
+                let passcode = read_passcode(&dir);
+                start_node(app_handle, dir, name, passcode);
             }
 
             Ok(())
@@ -396,6 +437,8 @@ pub fn run() {
             my_id,
             has_username,
             set_username,
+            has_passcode,
+            set_passcode,
             conversations,
             contacts,
             messages,

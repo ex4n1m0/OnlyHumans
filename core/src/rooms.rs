@@ -154,6 +154,45 @@ pub fn global_room_hex(gk: &Key) -> String {
     hex::encode(&h.finalize()[..16])
 }
 
+/// Canonical form of a passcode word: surrounding whitespace stripped,
+/// Unicode-lowercased, so "Secret" and "secret " address the same room.
+pub fn normalize_passcode(word: &str) -> String {
+    word.trim().to_lowercase()
+}
+
+/// Effective community key for an optional passcode word.
+///
+/// Empty/blank word -> the GK unchanged (byte-identical main-room
+/// behavior). A word mixes into the derivation, producing a parallel
+/// room universe: same word + same binary -> same room, different word
+/// -> different room, and the word itself never crosses the network
+/// (only hashes of it do). The result is stretched with a chained-hash
+/// loop to slow offline dictionary scanning of common words by other
+/// holders of the same binary; this is convenience isolation, not
+/// strong access control.
+pub fn effective_gk(gk: &Key, word: Option<&str>) -> Key {
+    let Some(word) = word else { return *gk };
+    let word = normalize_passcode(word);
+    if word.is_empty() {
+        return *gk;
+    }
+    let mut h = Sha256::new();
+    h.update(b"OH1-pass-v1|");
+    h.update(gk);
+    h.update(word.as_bytes());
+    let mut k = Key::default();
+    k.copy_from_slice(&h.finalize());
+    // Stretch once per derivation (~tens of ms release): a scanner must
+    // pay the same chain for every candidate word.
+    for _ in 0..65_536 {
+        let mut h = Sha256::new();
+        h.update(b"OH1-pass-x|");
+        h.update(k);
+        k.copy_from_slice(&h.finalize());
+    }
+    k
+}
+
 #[derive(Serialize, Deserialize)]
 struct MembersPayload {
     members: Vec<MemberInfo>,
@@ -791,4 +830,54 @@ fn now_seed() -> u64 {
 
 fn err(context: &str) -> RoomEvent {
     RoomEvent::ProtocolError { context: context.to_string() }
+}
+
+#[cfg(test)]
+mod passcode_tests {
+    use super::*;
+
+    fn gk() -> Key {
+        [7u8; 32]
+    }
+
+    #[test]
+    fn empty_word_is_the_untouched_gk() {
+        assert_eq!(effective_gk(&gk(), None), gk());
+        assert_eq!(effective_gk(&gk(), Some("")), gk());
+        assert_eq!(effective_gk(&gk(), Some("   \t ")), gk());
+    }
+
+    #[test]
+    fn normalization_folds_case_and_whitespace() {
+        assert_eq!(normalize_passcode("  Secret "), "secret");
+        assert_eq!(normalize_passcode("SECRET"), "secret");
+        assert_eq!(normalize_passcode("ÜBER"), normalize_passcode("über"));
+        assert_eq!(
+            effective_gk(&gk(), Some("Secret")),
+            effective_gk(&gk(), Some(" secret\t"))
+        );
+    }
+
+    #[test]
+    fn words_partition_the_room_universe() {
+        let base = gk();
+        // Determinism.
+        assert_eq!(effective_gk(&base, Some("lair")), effective_gk(&base, Some("lair")));
+        // Different words, different keys and room ids; neither is the
+        // main room.
+        let lair = effective_gk(&base, Some("lair"));
+        let cave = effective_gk(&base, Some("cave"));
+        assert_ne!(lair, cave);
+        assert_ne!(lair, base);
+        assert_ne!(cave, base);
+        assert_ne!(global_room_hex(&lair), global_room_hex(&cave));
+        assert_ne!(global_room_hex(&lair), global_room_hex(&base));
+        // A different binary (GK) with the same word is a different
+        // universe: per-clone isolation holds inside passcode rooms.
+        let other_base = [8u8; 32];
+        assert_ne!(
+            effective_gk(&other_base, Some("lair")),
+            effective_gk(&base, Some("lair"))
+        );
+    }
 }

@@ -80,9 +80,16 @@ function renderGate() {
         <input id="name-input" placeholder="your name…" maxlength="32" spellcheck="false" autocomplete="off">
         <button class="primary" id="name-go">Enter the room</button>
       </div>
+      <div class="gaterow">
+        <input id="code-input" placeholder="room code (optional)" maxlength="64" spellcheck="false" autocomplete="off">
+      </div>
+      <p class="gatenote">Leave the code empty for the main room everyone lands in.
+      Enter a word and you'll meet only people who use the same word —
+      same code, same room.</p>
       <p class="gatehint" id="gate-err"></p>
     </div>`;
   const input = document.getElementById("name-input") as HTMLInputElement;
+  const codeInput = document.getElementById("code-input") as HTMLInputElement;
   input.focus();
   const go = async () => {
     const name = input.value.trim();
@@ -91,7 +98,7 @@ function renderGate() {
       return;
     }
     try {
-      await invoke("set_username", { name });
+      await invoke("set_username", { name, passcode: codeInput.value });
       await boot();
     } catch (e) {
       document.getElementById("gate-err")!.textContent = String(e);
@@ -129,8 +136,12 @@ async function boot() {
   let hostPeer = "";
   let members: MemberInfo[] = [];
   let renamingPeer: string | null = null;
+  let editingCode = false;
   let clearArmed = false;
   let clearTimer: number | undefined;
+  // True when this profile started with a room code: the app then lives
+  // in the code's room universe instead of the main room.
+  const codeRoom: boolean = await invoke("has_passcode");
   let messages: ChatMessage[] = [];
 
   render();
@@ -293,9 +304,10 @@ async function boot() {
           <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}">
             ${MAIN_ROOM_ICON}
             <div class="rc-body">
-              <div class="rc-name">Main Room</div>
-              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · everyone</div>
+              <div class="rc-name">${codeRoom ? "Code Room" : "Main Room"}</div>
+              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · ${codeRoom ? "same code" : "everyone"}</div>
             </div>
+            <button class="rename-btn" id="room-code" title="room code">✎ code</button>
           </div>` : ""}
           <div class="side-label plabel">private chats</div>
           ${dms.size ? `<ul class="dm-list">
@@ -329,7 +341,7 @@ async function boot() {
             ${activeRoom === room
               ? `${MAIN_ROOM_ICON}
                  <div class="tb-body">
-                   <div class="tb-title">Main Room <span class="pub-pill">public</span></div>
+                   <div class="tb-title">${codeRoom ? "Code Room" : "Main Room"} <span class="pub-pill ${codeRoom ? "code" : ""}">${codeRoom ? "code-gated" : "public"}</span></div>
                    <div class="tb-sub">${statusLine()} · key epoch ${epoch}</div>
                  </div>
                  <div class="tb-actions">
@@ -370,7 +382,7 @@ async function boot() {
             <input id="send-text" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" autocomplete="off" ${ready ? "" : "disabled"}>
             <button class="primary" id="send">Send</button>
           </div>
-        </div>` : `<div class="empty">${statusLine()}<br>The room key is shared with everyone holding the community key.</div>`}
+        </div>` : `<div class="empty">${statusLine()}<br>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "The room key is shared with everyone holding the community key."}</div>`}
       </main>`;
 
     (document.getElementById("msgs") as HTMLElement | null)?.scrollTo(0, 1e9);
@@ -387,12 +399,57 @@ async function boot() {
     }
 
     // Room switcher: the pinned main-room row.
-    document.querySelector<HTMLElement>(".sidebar .roomcard")?.addEventListener("click", async () => {
+    document.querySelector<HTMLElement>(".sidebar .roomcard")?.addEventListener("click", async (e) => {
+      if ((e.target as HTMLElement).id === "room-code") return;
       if (!room) return;
       activeRoom = room;
       await refreshMessages();
       render();
     });
+    // Room code: change/clear the code word for this profile. Rooms can't
+    // be swapped mid-session, so saving restarts the app.
+    document.getElementById("room-code")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      editingCode = true;
+      render();
+    });
+    if (editingCode) {
+      const box = ensureToasts();
+      const t = document.createElement("div");
+      t.className = "toast";
+      t.innerHTML = `<b>Room code</b><div class="code-note">Empty = the main room. A word = a private room for everyone using the same word. Saving restarts the app.</div>`;
+      const row = document.createElement("div");
+      row.className = "actions";
+      const input = document.createElement("input");
+      input.id = "code-edit-input";
+      input.placeholder = "code word…";
+      input.maxLength = 64;
+      const save = document.createElement("button");
+      save.className = "primary"; save.textContent = "Save";
+      const cancel = document.createElement("button");
+      cancel.textContent = "Cancel";
+      row.append(input, save, cancel);
+      t.appendChild(row);
+      box.appendChild(t);
+      input.focus();
+      const done = async () => {
+        editingCode = false;
+        try {
+          await invoke("set_passcode", { word: input.value });
+          // set_passcode restarts the app; this only runs if it errored.
+          t.remove();
+          render();
+        } catch (err) {
+          toast(String(err));
+        }
+      };
+      save.onclick = () => void done();
+      cancel.onclick = () => { editingCode = false; t.remove(); };
+      input.addEventListener("keydown", (e) => {
+        if ((e as KeyboardEvent).key === "Enter") void done();
+        if ((e as KeyboardEvent).key === "Escape") { editingCode = false; t.remove(); }
+      });
+    }
     // Open private rooms listed in the sidebar: click to switch.
     document.querySelectorAll<HTMLElement>(".sidebar li.dmrow").forEach((li) => {
       li.addEventListener("click", () => {

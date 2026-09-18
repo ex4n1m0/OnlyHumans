@@ -187,6 +187,10 @@ pub struct NodeConfig {
     pub room_host: Option<String>,
     /// Display name shared with the room on join.
     pub username: Option<String>,
+    /// Optional room passcode: when set (non-blank), the node derives a
+    /// parallel room universe from (GK, word) instead of joining the
+    /// main room. Same word + same binary -> same room.
+    pub passcode: Option<String>,
 }
 
 impl Default for NodeConfig {
@@ -202,6 +206,7 @@ impl Default for NodeConfig {
             assume_host: false,
             room_host: None,
             username: None,
+            passcode: None,
         }
     }
 }
@@ -282,7 +287,7 @@ pub async fn spawn(
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(64);
 
     let mut rooms = Rooms::new(
-        crate::global_key(),
+        crate::rooms::effective_gk(&crate::global_key(), cfg.passcode.as_deref()),
         identity.id_string(),
         cfg.username.clone().unwrap_or_default(),
     );
