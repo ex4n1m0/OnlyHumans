@@ -182,11 +182,11 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
                     let shown = (|| -> Result<(), notify_rust::error::Error> {
                         let mut n = notify_rust::Notification::new();
                         // notify-rust names the sender per platform: the
-                        // AUMID on Windows, the desktop entry on Linux.
+                        // AUMID on Windows, the appname on XDG desktops.
                         #[cfg(windows)]
                         n.app_id("space.deepflux.onlyhumans");
                         #[cfg(not(windows))]
-                        n.app_name("OnlyHumans");
+                        n.appname("OnlyHumans");
                         n.summary("OnlyHumans").body(&body).show()?;
                         Ok(())
                     })();
