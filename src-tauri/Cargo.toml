@@ -1,6 +1,6 @@
 [package]
 name = "onlyhumans-app"
-version = "1.0.1"
+version = "1.0.4"
 edition = "2021"
 
 [lib]

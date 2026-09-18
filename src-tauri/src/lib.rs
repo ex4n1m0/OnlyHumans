@@ -21,6 +21,72 @@ fn has_username(app: AppHandle) -> bool {
     resolve_dir(&app).map(|d| read_username(&d).is_some()).unwrap_or(false)
 }
 
+/// The UI's own display name. The member list over the wire only ever
+/// carries OTHER peers' names to a host (a solo founder would otherwise
+/// have no name to show for itself).
+#[tauri::command]
+fn username(app: AppHandle) -> Option<String> {
+    resolve_dir(&app).and_then(|d| read_username(&d))
+}
+
+/// This profile's room code, so the gate can prefill it after a logoff
+/// (logging off keeps the room binding — only the name is forgotten).
+#[tauri::command]
+fn passcode(app: AppHandle) -> Option<String> {
+    resolve_dir(&app).and_then(|d| read_passcode(&d))
+}
+
+/// Log off: forget this profile's username and drop back to the name/code
+/// gate. The passcode (room binding) and identity stay, so submitting the
+/// gate re-enters the SAME room under a new name.
+#[tauri::command]
+fn logoff(app: AppHandle) -> Result<(), String> {
+    let dir = resolve_dir(&app).ok_or("no data dir")?;
+    std::fs::remove_file(dir.join("username.txt")).map_err(|e| e.to_string())?;
+    app.restart(); // does not return (same semantics as set_passcode)
+    Ok(())
+}
+
+/// Open a second app window living in its own parallel room: a fresh
+/// profile dir under <data>/rooms/<id> boots straight into the welcome
+/// gate, where a new name + code word select that window's room universe.
+/// Detached from this process so it survives our exit.
+#[tauri::command]
+fn open_parallel_room(app: AppHandle) -> Result<(), String> {
+    let base = resolve_dir(&app).ok_or("no data dir")?.join("rooms");
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    // Random-enough dir name from the clock; retry on the (absurd) collision.
+    let mut dir = base.join(format!(
+        "{:016x}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_nanos() as u64
+            ^ std::process::id() as u64
+    ));
+    let mut n = 0;
+    while dir.exists() && n < 8 {
+        dir = base.join(format!("{:016x}-{}", n, std::process::id()));
+        n += 1;
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.env("OH_DATA_DIR", &dir).env("OH_INSTANCE", "parallel room");
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+    }
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn set_username(
     app: AppHandle,
@@ -428,6 +494,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             my_id,
             has_username,
+            username,
+            passcode,
+            logoff,
+            open_parallel_room,
             set_username,
             has_passcode,
             set_passcode,

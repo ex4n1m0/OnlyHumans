@@ -56,23 +56,21 @@ function fmtTime(ts: number): string {
 
 async function main() {
   // First-run gate: the room is only joined once a username exists.
+  // After a logoff the profile's room code is prefilled — the gate then
+  // re-enters the SAME room under the new name.
   const named: boolean = await invoke("has_username");
   if (!named) {
-    renderGate();
+    renderGate(await invoke<string | null>("passcode"));
     return;
   }
   await boot();
 }
 
-function renderGate() {
+function renderGate(prefillCode: string | null = null) {
   layout.innerHTML = `
     <div class="gate">
       <div class="brand" style="justify-content:center">
-        <svg viewBox="0 0 44 44" style="width:40px;height:40px" aria-hidden="true">
-          <rect x="2" y="2" width="40" height="40" rx="10" fill="none" stroke="#17a2b8" stroke-width="2.5"/>
-          <circle cx="15" cy="15" r="3.6" fill="#17a2b8"/><circle cx="30" cy="17" r="3.6" fill="#17a2b8"/><circle cx="22" cy="31" r="3.6" fill="#17a2b8"/>
-          <path d="M17.6 16.4 L27.4 16.9 M16.6 18 20.5 28 M28.6 20 24 28.4" stroke="#17a2b8" stroke-width="1.6" stroke-linecap="round"/>
-        </svg>
+        <img class="brandlogo" src="/logo.png" alt="" style="width:44px;height:44px;border-radius:10px">
       </div>
       <h2>Welcome to OnlyHumans</h2>
       <p>Pick a name — the room will know you by it.</p>
@@ -90,6 +88,7 @@ function renderGate() {
     </div>`;
   const input = document.getElementById("name-input") as HTMLInputElement;
   const codeInput = document.getElementById("code-input") as HTMLInputElement;
+  if (prefillCode) codeInput.value = prefillCode;
   input.focus();
   const go = async () => {
     const name = input.value.trim();
@@ -112,6 +111,7 @@ function renderGate() {
 
 async function boot() {
   const myId: string = await invoke("my_id");
+  const myName: string = (await invoke<string | null>("username")) ?? "";
   const contactNames = new Map<string, string>();
   for (const c of await invoke<Contact[]>("contacts")) contactNames.set(c.peer_id, c.name);
   const displayName = (peer: string) => {
@@ -139,10 +139,23 @@ async function boot() {
   let editingCode = false;
   let clearArmed = false;
   let clearTimer: number | undefined;
+  let rotateArmed = false;
+  let rotateTimer: number | undefined;
   // True when this profile started with a room code: the app then lives
   // in the code's room universe instead of the main room.
   const codeRoom: boolean = await invoke("has_passcode");
   let messages: ChatMessage[] = [];
+
+  // Live elapsed counter for the room-search phase: finding the room can
+  // legitimately take ~60s (grace period before founding), which reads as
+  // a hang without a ticking indicator. Full re-renders would fight the
+  // incoming node events, so only the status text nodes are touched.
+  const joinStart = Date.now();
+  const joinTicker = setInterval(() => {
+    if (room !== null) { clearInterval(joinTicker); return; }
+    document.querySelectorAll<HTMLElement>(".live-status")
+      .forEach((el) => (el.textContent = statusLine()));
+  }, 1000);
 
   render();
   await invoke("request_state").catch(() => {});
@@ -254,12 +267,13 @@ async function boot() {
   }
 
   function statusLine(): string {
+    const secs = Math.floor((Date.now() - joinStart) / 1000);
     switch (status) {
       case "hosting": return "you host the room";
       case "connected": return `connected · ${displayName(hostPeer)} hosts`;
-      case "joining": return "joining the room…";
+      case "joining": return `joining the room… ${secs}s`;
       case "founding": return "creating the room (first member)…";
-      default: return "looking for the room…";
+      default: return `looking for the room… ${secs}s`;
     }
   }
 
@@ -292,12 +306,18 @@ async function boot() {
       : null;
     layout.innerHTML = `
       <header>
+        <img class="brandlogo" src="/logo.png" alt="">
         <span class="logo">OnlyHumans</span>
+        ${myName ? `<span class="whoami">· ${escapeHtml(myName)}</span>` : ""}
       </header>
       <main>
         <div class="sidebar">
           <div class="roominfo">
-            <div class="status">${statusLine()}</div>
+            <div class="status live-status">${statusLine()}</div>
+            <div class="roomactions">
+              <button id="new-room" title="open a second window with its own name and code word — this room stays open">+ new room</button>
+              <button id="logoff" title="forget this name — back to the name/code gate of this room">log off</button>
+            </div>
           </div>
           <div class="side-label">the room</div>
           ${ready ? `
@@ -324,6 +344,14 @@ async function boot() {
           </ul>` : `<div class="side-hint">Click someone below to start a private chat.</div>`}
           <div class="side-label">people in the room</div>
           <ul class="member-list">
+            ${ready ? `
+            <li class="${isHost ? "ishost" : ""}" title="this is you">
+              ${avatarHtml(myId, myName)}
+              <div class="li-body">
+                <span class="mname">${escapeHtml(myName ? `${myName} (you)` : "you")}</span>
+                <span class="li-sub">${isHost ? "hosts the room" : "you"}</span>
+              </div>
+            </li>` : ""}
             ${members.filter((m) => m.peer !== myId).map((m) => `
               <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="click for a private chat">
                 ${avatarHtml(m.peer, memberLabel(m))}
@@ -345,7 +373,7 @@ async function boot() {
                    <div class="tb-sub">${statusLine()} · key epoch ${epoch}</div>
                  </div>
                  <div class="tb-actions">
-                   ${isHost ? '<button id="rotate">Rotate key</button>' : ""}
+                   ${isHost ? `<button id="rotate" class="${rotateArmed ? "danger" : ""}" title="cut over to a new key — anyone offline must rejoin to read new messages">${rotateArmed ? "Really rotate?" : "Rotate key"}</button>` : ""}
                    <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
                      ${clearArmed ? "Really clear?" : "Clear history"}
                    </button>
@@ -363,6 +391,7 @@ async function boot() {
                 })()}
           </div>
           <div class="messages" id="msgs">
+            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${codeRoom ? "You're in — only people who entered the same code word can land here." : "You're in — everyone who opens the app joins this room. Say hi."}</div>` : ""}
             ${(activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? [])).map((m) => {
               const showSender = activeRoom === room && !m.outgoing;
               const hue = peerHue(m.sender);
@@ -382,7 +411,7 @@ async function boot() {
             <input id="send-text" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" autocomplete="off" ${ready ? "" : "disabled"}>
             <button class="primary" id="send">Send</button>
           </div>
-        </div>` : `<div class="empty">${statusLine()}<br>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "The room key is shared with everyone holding the community key."}</div>`}
+        </div>` : `<div class="empty"><div class="join-progress"><span class="spin"></span><span class="live-status">${statusLine()}</span></div>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "Nobody has answered the hub yet — if no host appears within a minute, this device creates the room."}</div>`}
       </main>`;
 
     (document.getElementById("msgs") as HTMLElement | null)?.scrollTo(0, 1e9);
@@ -417,7 +446,7 @@ async function boot() {
       const box = ensureToasts();
       const t = document.createElement("div");
       t.className = "toast";
-      t.innerHTML = `<b>Room code</b><div class="code-note">Empty = the main room. A word = a private room for everyone using the same word. Saving restarts the app.</div>`;
+      t.innerHTML = `<b>Change this window's room</b><div class="code-note">Type a word and Save — this window restarts inside that word's room (everyone using the same word meets there). Empty returns you to the main room. To keep this room open and open another one beside it, use “+ new room” instead.</div>`;
       const row = document.createElement("div");
       row.className = "actions";
       const input = document.createElement("input");
@@ -519,8 +548,30 @@ async function boot() {
       if ((e as KeyboardEvent).key === "Enter") sendCurrent();
     });
     document.getElementById("rotate")?.addEventListener("click", async () => {
+      if (!rotateArmed) {
+        // Irreversible for anyone offline at switch-over: the new key only
+        // travels to members reachable now; they must rejoin to catch up.
+        rotateArmed = true;
+        render();
+        toast("Rotating cuts the key over NOW — anyone offline misses the switch and must rejoin before they can read new messages. Click again to confirm.");
+        rotateTimer = window.setTimeout(() => {
+          rotateArmed = false;
+          render();
+        }, 8000);
+        return;
+      }
+      window.clearTimeout(rotateTimer);
+      rotateArmed = false;
       await invoke("rotate_key");
       toast("Key rotated — new key sent to current members only");
+    });
+
+    document.getElementById("new-room")?.addEventListener("click", () => {
+      void invoke("open_parallel_room").catch((e) => toast(String(e)));
+    });
+
+    document.getElementById("logoff")?.addEventListener("click", () => {
+      void invoke("logoff").catch((e) => toast(String(e)));
     });
 
     document.getElementById("clear-hist")?.addEventListener("click", async () => {

@@ -30,6 +30,8 @@ header {
   border-bottom: 1px solid #1f3038;
 }
 header .logo { font-weight: 700; letter-spacing: .04em; color: var(--teal); }
+header .brandlogo { width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0; }
+header .whoami { color: var(--muted); font-size: .85em; }
 header .myid {
   flex: 1; font-family: Consolas, monospace; font-size: 11px;
   color: var(--muted); white-space: nowrap; overflow: hidden;
@@ -161,7 +163,23 @@ button.danger { background: transparent; border-color: var(--danger); color: var
   box-shadow: 0 4px 18px rgba(0,0,0,.4);
 }
 .toast .actions { margin-top: 8px; display: flex; gap: 6px; }
-.empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+         gap: .5rem; color: var(--muted); text-align: center; padding: 1rem; }
+.roominfo .roomactions { display: flex; gap: 6px; margin-top: 6px; }
+.roominfo .roomactions button {
+  flex: 1; font-size: 11px; padding: 4px 6px; background: transparent;
+  border: 1px solid var(--line); color: var(--muted); border-radius: 6px;
+  cursor: pointer;
+}
+.roominfo .roomactions button:hover { border-color: var(--teal); color: var(--ink); }
+.join-progress { display: flex; align-items: center; justify-content: center; gap: .5rem;
+                 margin-bottom: .6rem; color: var(--teal); }
+.spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--teal-dim);
+        border-top-color: var(--teal); display: inline-block;
+        animation: ohspin 1s linear infinite; }
+@keyframes ohspin { to { transform: rotate(360deg); } }
+.chat-hint { margin: auto; padding: 1rem; color: var(--muted); font-size: 12px;
+             font-style: italic; text-align: center; }
 .gate { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: .7rem; text-align: center; padding: 2rem; }
 .gate h2 { color: #fff; font-size: 1.5rem; }
