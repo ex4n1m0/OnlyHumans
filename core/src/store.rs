@@ -397,3 +397,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+impl Store {
+    /// Drop a room's persisted state (key, epoch, host row). The node
+    /// forgets it was ever in the room and rediscovers it from the hub —
+    /// used when yielding to a live foreign host record and by the
+    /// manual "reset room" recovery action.
+    pub fn clear_conversation(&self, room_id_hex: &str) -> anyhow::Result<()> {
+        self.conn
+            .execute("DELETE FROM conversations WHERE room_id_hex = ?1", params![room_id_hex])?;
+        Ok(())
+    }
+}

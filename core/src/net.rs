@@ -137,6 +137,10 @@ pub enum Command {
     Rotate,
     /// Wipe the room's message history on every participant.
     ClearHistory,
+    /// Forget this window's room state (key, epoch, host row) and
+    /// rediscover the room from the hub — manual recovery for a
+    /// split-brained or stuck room.
+    ResetRoom,
     /// Explicitly reserve a relay circuit; `addr` is the relay's full
     /// address ending in /p2p/<relay_id> (tests, port-forwarded hosts).
     ReserveWith { addr: Multiaddr },
@@ -346,6 +350,24 @@ pub async fn spawn(
                     if matches!(cmd, Command::Shutdown) {
                         break;
                     }
+                    if matches!(cmd, Command::ResetRoom) {
+                        // Needs the run-loop latches, so it lives here
+                        // instead of handle_command: drop the room and
+                        // every discovery latch so the next tick starts
+                        // the join/found flow over from scratch.
+                        rooms.reset();
+                        rooms.sealed = false;
+                        let _ = store.lock().unwrap().clear_conversation(&room_hex);
+                        announced = false;
+                        host_record_ok = false;
+                        grace_left = None;
+                        join_target = None;
+                        let _ = event_tx.send(NodeEvent::JoinStatus { status: "connecting".into() });
+                        let _ = event_tx.send(NodeEvent::Log {
+                            message: "room state reset — rediscovering the room".into(),
+                        });
+                        continue;
+                    }
                     handle_command(
                         &mut swarm,
                         &mut rooms,
@@ -383,7 +405,27 @@ pub async fn spawn(
                     // so the election pointer never silently expires while
                     // they are alive.
                     if rooms.is_host() {
-                        if let Err(e) = hub.register_room(&identity, &room_hex).await {
+                        // The record is NX-owned: a restored host cannot
+                        // steal a LIVE record from its current holder. If
+                        // one is held by someone else, yield our (stale)
+                        // room state and rejoin through normal discovery —
+                        // otherwise two computers each host their own copy
+                        // of the room forever.
+                        let foreign_live = match hub.lookup_room(&room_hex).await {
+                            Ok(Some(rec)) => rec.host_peer_id != identity.peer_id().to_string(),
+                            _ => false,
+                        };
+                        if foreign_live {
+                            rooms.reset();
+                            let _ = store.lock().unwrap().clear_conversation(&room_hex);
+                            announced = false;
+                            host_record_ok = false;
+                            grace_left = None;
+                            join_target = None;
+                            let _ = event_tx.send(NodeEvent::Log {
+                                message: "another live host holds the room record — yielding, rejoining".into(),
+                            });
+                        } else if let Err(e) = hub.register_room(&identity, &room_hex).await {
                             let _ = event_tx.send(NodeEvent::Log { message: format!("room record: {e}") });
                         }
                     }
@@ -543,6 +585,8 @@ async fn handle_command(
     match cmd {
         // Handled by the run loop (breaks the select); unreachable here.
         Command::Shutdown => {}
+        // Intercepted in the run loop (needs the discovery latches).
+        Command::ResetRoom => {}
         Command::Dial { addr } => {
             if let Err(e) = swarm.dial(addr.clone()) {
                 let _ = event_tx.send(NodeEvent::Log { message: format!("dial failed: {e}") });
@@ -701,6 +745,21 @@ async fn room_orchestration(
     // member so fan-out delivery works.
     if rooms.is_ready() {
         if !*announced {
+            // A restored host must not blindly re-announce: if a LIVE
+            // record names a different host, the election already chose
+            // them — yield immediately instead of hosting a fork.
+            if rooms.is_host() && !cfg.offline {
+                if let Ok(Some(rec)) = hub.lookup_room(room_hex).await {
+                    if rec.host_peer_id != identity.peer_id().to_string() {
+                        rooms.reset();
+                        let _ = store.lock().unwrap().clear_conversation(room_hex);
+                        let _ = event_tx.send(NodeEvent::Log {
+                            message: "another live host holds the room record — yielding, rejoining".into(),
+                        });
+                        return;
+                    }
+                }
+            }
             *announced = true;
             let st = rooms.state().expect("ready implies state");
             let _ = event_tx.send(NodeEvent::JoinStatus {

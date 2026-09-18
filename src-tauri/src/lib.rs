@@ -342,6 +342,15 @@ async fn rotate_key(state: tauri::State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn reset_room(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
+    node.cmd_tx
+        .send(Command::ResetRoom)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn clear_history(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let node = state.node.lock().unwrap().clone().ok_or("node not running")?;
     node.cmd_tx
@@ -516,6 +525,7 @@ pub fn run() {
             send_message,
             open_dm,
             rotate_key,
+            reset_room,
             clear_history,
             request_state,
             add_contact

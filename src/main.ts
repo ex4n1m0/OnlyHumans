@@ -141,6 +141,7 @@ async function boot() {
   let clearArmed = false;
   let clearTimer: number | undefined;
   let rotateModalOpen = false;
+  let resetModalOpen = false;
   // True when this profile started with a room code: the app then lives
   // in the code's room universe instead of the main room.
   const codeRoom: boolean = await invoke("has_passcode");
@@ -158,7 +159,10 @@ async function boot() {
   }, 1000);
 
   document.addEventListener("keydown", (e) => {
-    if ((e as KeyboardEvent).key === "Escape" && rotateModalOpen) closeRotateModal();
+    if ((e as KeyboardEvent).key === "Escape") {
+      if (rotateModalOpen) closeRotateModal();
+      if (resetModalOpen) closeResetModal();
+    }
   });
 
   render();
@@ -287,6 +291,11 @@ async function boot() {
     render();
   }
 
+  function closeResetModal() {
+    resetModalOpen = false;
+    render();
+  }
+
   function toast(text: string) {
     const box = ensureToasts();
     const t = document.createElement("div");
@@ -383,8 +392,9 @@ async function boot() {
                    <div class="tb-title">${codeRoom ? "Code Room" : "Main Room"} <span class="pub-pill ${codeRoom ? "code" : ""}">${codeRoom ? "code-gated" : "public"}</span></div>
                    <div class="tb-sub">${statusLine()} · key epoch ${epoch}</div>
                  </div>
-                 <div class="tb-actions">
-                   ${isHost ? '<button id="rotate" title="new key — closes the room to newcomers forever">Rotate key</button>' : ""}
+                <div class="tb-actions">
+                  ${isHost ? '<button id="rotate" title="new key — closes the room to newcomers forever">Rotate key</button>' : ""}
+                  <button id="reset-room" title="forget this window's room key and rediscover the room">Reset room</button>
                    <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
                      ${clearArmed ? "Really clear?" : "Clear history"}
                    </button>
@@ -439,6 +449,21 @@ async function boot() {
           <div class="actions">
             <button id="rotate-cancel">Cancel</button>
             <button id="rotate-confirm" class="primary">Rotate now</button>
+          </div>
+        </div>
+      </div>` : ""}
+      ${resetModalOpen ? `
+      <div class="modal-backdrop" id="reset-backdrop">
+        <div class="modal">
+          <h3>Reset this room?</h3>
+          <p>This window forgets its room key and rediscovers the room from
+          the hub: it joins whoever currently hosts it, or creates it
+          fresh if nobody does. Use this to heal two computers that ended
+          up each hosting their own copy of the room. Your saved history
+          stays; the new key arrives from the host you join.</p>
+          <div class="actions">
+            <button id="reset-cancel">Cancel</button>
+            <button id="reset-confirm" class="primary">Reset room</button>
           </div>
         </div>
       </div>` : ""}`;
@@ -599,6 +624,30 @@ async function boot() {
       rotateModalOpen = false;
       await invoke("rotate_key").catch((e) => toast(String(e)));
       toast("Key rotated — the room is now closed to newcomers; current members keep their seats");
+      render();
+    });
+
+    document.getElementById("reset-room")?.addEventListener("click", () => {
+      resetModalOpen = true;
+      render();
+    });
+    document.getElementById("reset-cancel")?.addEventListener("click", closeResetModal);
+    document.getElementById("reset-backdrop")?.addEventListener("click", (e) => {
+      if (e.target === e.currentTarget) closeResetModal();
+    });
+    document.getElementById("reset-confirm")?.addEventListener("click", async () => {
+      resetModalOpen = false;
+      // Drop the UI's view of the room immediately; the node forgets its
+      // side on the command below and re-emits RoomReady when it lands
+      // in the room again (joining the current host, or founding anew).
+      room = null;
+      activeRoom = null;
+      isHost = false;
+      epoch = 1;
+      members = [];
+      messages = [];
+      status = "connecting";
+      await invoke("reset_room").catch((e) => toast(String(e)));
       render();
     });
 
