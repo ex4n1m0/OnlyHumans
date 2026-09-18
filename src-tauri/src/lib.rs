@@ -16,6 +16,13 @@ fn my_id(state: State<AppState>) -> String {
     state.my_id.clone()
 }
 
+/// Build version for the UI header (kept in lockstep with tauri.conf.json
+/// by tools/deploy-release.sh, which bumps both on every deployment).
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 #[tauri::command]
 fn has_username(app: AppHandle) -> bool {
     resolve_dir(&app).map(|d| read_username(&d).is_some()).unwrap_or(false)
@@ -493,6 +500,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             my_id,
+            app_version,
             has_username,
             username,
             passcode,

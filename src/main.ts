@@ -112,6 +112,7 @@ function renderGate(prefillCode: string | null = null) {
 async function boot() {
   const myId: string = await invoke("my_id");
   const myName: string = (await invoke<string | null>("username")) ?? "";
+  const appVer: string = (await invoke<string>("app_version").catch(() => "")) ?? "";
   const contactNames = new Map<string, string>();
   for (const c of await invoke<Contact[]>("contacts")) contactNames.set(c.peer_id, c.name);
   const displayName = (peer: string) => {
@@ -309,6 +310,7 @@ async function boot() {
         <img class="brandlogo" src="/logo.png" alt="">
         <span class="logo">OnlyHumans</span>
         ${myName ? `<span class="whoami">· ${escapeHtml(myName)}</span>` : ""}
+        ${appVer ? `<span class="ver">· v${escapeHtml(appVer)}</span>` : ""}
       </header>
       <main>
         <div class="sidebar">
