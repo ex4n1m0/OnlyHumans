@@ -140,18 +140,29 @@ async fn host_room_survives_restart() {
         a2.peer_id, a.peer_id,
         "same data dir must restore the same identity"
     );
+    // Event order after a restart is NOT guaranteed: the restored room's
+    // room_ready can arrive before the first listening event (or after),
+    // so capture whichever comes first instead of assuming an order.
+    let mut a2_ready_seen = false;
     let a2_addr = loop {
         match next_event(&mut a2_rx, "listening").await {
             NodeEvent::Listening { addr } if addr.contains("quic") => break addr,
+            NodeEvent::RoomReady { room, we_are_host: true, epoch, .. } => {
+                assert_eq!(room, room_hex, "restart must restore the same room");
+                assert_eq!(epoch, 1);
+                a2_ready_seen = true;
+            }
             _ => continue,
         }
     };
-    match next_event(&mut a2_rx, "room_ready").await {
-        NodeEvent::RoomReady { room, we_are_host: true, epoch, .. } => {
-            assert_eq!(room, room_hex, "restart must restore the same room");
-            assert_eq!(epoch, 1);
+    if !a2_ready_seen {
+        match next_event(&mut a2_rx, "room_ready").await {
+            NodeEvent::RoomReady { room, we_are_host: true, epoch, .. } => {
+                assert_eq!(room, room_hex, "restart must restore the same room");
+                assert_eq!(epoch, 1);
+            }
+            other => panic!("A2 should restore as host, got {other:?}"),
         }
-        other => panic!("A2 should restore as host, got {other:?}"),
     }
 
     // B reconnects to A's new listener; its message decrypts with the
