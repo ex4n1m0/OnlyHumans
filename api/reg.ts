@@ -158,8 +158,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const record = { peer_id: peerId, public_key_b64: pubB64, addrs, ts_ms: ts, sig_b64: sigB64 };
     await redisSet(`peer:${peerId}`, JSON.stringify(record), { ex: 300 });
-    res.status(200).json({ ok: true });
+    // Mini-STUN: echo the public IP this registration arrived from so
+    // peers behind NAT can publish a same-port guess alongside their LAN
+    // addresses. Advisory response data only — never stored.
+    res.status(200).json({ ok: true, observedIp: observedIp(req) });
   } catch (e: any) {
     res.status(500).json({ error: "redis failed", detail: String(e?.message ?? e) });
   }
+}
+
+function observedIp(req: VercelRequest): string | undefined {
+  const xff = (req.headers["x-forwarded-for"] as string | string[] | undefined) ?? "";
+  const first = (Array.isArray(xff) ? xff[0] : xff).split(",")[0].trim();
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(first) ? first : undefined;
 }
