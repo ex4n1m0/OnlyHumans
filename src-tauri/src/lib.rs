@@ -4,7 +4,6 @@ use onlyhumans_core::net::{spawn, Command, NodeConfig, NodeEvent, NodeHandle};
 use onlyhumans_core::store::{Contact, Conversation, StoredMessage, Store};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tauri_plugin_notification::NotificationExt;
 
 struct AppState {
     store: Mutex<Store>,
@@ -176,28 +175,16 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
                     .map(|w| !w.is_focused().unwrap_or(true))
                     .unwrap_or(true);
                 if unfocused {
-                    // Fire via notify-rust directly: the plugin skips the
-                    // app id for exes under target/, which attributes the
-                    // toast to PowerShell. Our registry AUMID entry makes
-                    // this id resolve to "OnlyHumans".
-                    #[cfg(windows)]
+                    // One path for every desktop OS: notify-rust. On
+                    // Windows the registry AUMID entry resolves our app_id
+                    // to "OnlyHumans"; on Linux it maps to the bundled
+                    // .desktop entry over D-Bus.
                     let shown = (|| -> Result<(), notify_rust::error::Error> {
                         let mut n = notify_rust::Notification::new();
                         n.app_id("space.deepflux.onlyhumans");
                         n.summary("OnlyHumans").body(&body).show()?;
                         Ok(())
                     })();
-                    #[cfg(not(windows))]
-                    let shown = app_handle
-                        .notification()
-                        .builder()
-                        .title("OnlyHumans")
-                        .body(body)
-                        .show()
-                        .map(|_| ())
-                        .map_err(|e| {
-                            let _ = e;
-                        });
                     if let Err(e) = shown {
                         append_log(&log_dir, &format!("notification failed: {e}"));
                     }
