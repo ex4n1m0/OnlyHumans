@@ -50,6 +50,9 @@
     transition: transform .12s ease, box-shadow .12s ease;
   }
   a.dl:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(23,162,184,.35); }
+  a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
+             box-shadow: none; margin-top: .55rem; }
+  a.dl.alt:hover { box-shadow: 0 8px 24px rgba(23,162,184,.22); }
   a.dl svg { width: 20px; height: 20px; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .dl-note { font-size: .85rem; color: var(--muted); max-width: 46ch; line-height: 1.5; }
@@ -127,8 +130,21 @@
           <span>Download for Windows</span>
         </a>
         <span class="dl-meta" id="dl-meta">v0.1.0 · 5.3 MB</span>
-        <span class="dl-note">64-bit installer for Windows 10/11. Run it and
-        you're in the room — nothing to configure, no account to create.</span>
+        <a class="dl alt" id="dl-linux-btn" href="/download/OnlyHumans_0.1.0_amd64.AppImage" download>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Download for Linux</span>
+        </a>
+        <span class="dl-meta" id="dl-linux-meta">v0.1.0 · AppImage 87 MB ·
+        <a id="dl-deb" href="/download/OnlyHumans_0.1.0_amd64.deb">.deb 10.7&nbsp;MB</a> (Debian/Ubuntu/Mint)</span>
+        <span class="dl-note">Windows 10/11: run the installer and you're in
+        the room — nothing to configure, no account to create. Linux: the
+        AppImage runs on most 64-bit distros (make it executable, then open
+        it); the .deb suits Debian, Ubuntu and Mint. Both platforms land in
+        the same room. Very old distros may need a newer WebKitGTK; if a
+        window doesn't appear, launch with
+        <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code>.</span>
       </div>
     </div>
 
@@ -274,6 +290,15 @@
       if (v.date) meta.push("deployed " + new Date(v.date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }));
       document.getElementById("dl-meta").textContent = meta.join(" · ");
       if (v.file) document.getElementById("dl-btn").href = v.file;
+      if (v.linux) {
+        if (v.linux.appimage) document.getElementById("dl-linux-btn").href = v.linux.appimage;
+        const lmParts = ["v" + (v.linux.version || v.version)];
+        if (v.linux.appimageSize) lmParts.push("AppImage " + v.linux.appimageSize);
+        const lm = document.getElementById("dl-linux-meta");
+        lm.innerHTML = lmParts.join(" · ") + " · " +
+          '<a href="' + (v.linux.deb || "#") + '">.deb ' +
+          (v.linux.debSize || "") + "&nbsp;MB</a> (Debian/Ubuntu/Mint)";
+      }
       if (v.version) {
         document.getElementById("deploy-line").textContent =
           "site build " + v.version + " · " + v.date;
