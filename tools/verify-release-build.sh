@@ -9,7 +9,7 @@ set -a; source secrets/release-gk.env; set +a
 export OH_GK_A OH_GK_B
 
 EXE=target/release/onlyhumans-app.exe
-SETUP=$(ls target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
+SETUP=$(ls -t target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
 EXPECT_ROOM=7ce7d037f2428e5377b188489a20bc3c
 
 echo "== room_id (release profile) =="
