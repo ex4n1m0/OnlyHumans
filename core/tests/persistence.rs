@@ -104,6 +104,23 @@ async fn host_room_survives_restart() {
 
     // --- A stops (clean shutdown releases ports + DB) and comes back ---
     a.cmd_tx.send(Command::Shutdown).await.unwrap();
+    // Determinism across platforms: wait until B actually OBSERVES the
+    // host going away (QUIC keepalive/ping timeout) before re-dialing —
+    // on Linux the stale connection can otherwise outlive the restart
+    // and race the rejoin.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        assert!(tokio::time::Instant::now() < deadline, "B never saw A leave");
+        let ev = tokio::time::timeout(Duration::from_secs(5), b_rx.recv())
+            .await
+            .expect("timed out waiting for b events")
+            .expect("node task died");
+        if let NodeEvent::ConnectionStateChanged { peer, connected: false } = &ev {
+            if *peer == a.peer_id.to_string() {
+                break;
+            }
+        }
+    }
     tokio::time::sleep(Duration::from_secs(1)).await;
 
     let (a2_tx, mut a2_rx) = mpsc::unbounded_channel();
