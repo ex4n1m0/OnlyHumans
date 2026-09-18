@@ -32,7 +32,7 @@
   .hero-inner { max-width: 1000px; margin: 0 auto; display: flex; gap: 3rem;
                 align-items: center; justify-content: space-between; flex-wrap: wrap; }
   .brand { display: flex; align-items: center; gap: .8rem; }
-  .brand svg { width: 44px; height: 44px; }
+  .brand img { width: 44px; height: 44px; }
   .wordmark { font-size: 1.35rem; font-weight: 700; letter-spacing: .02em; color: #fff; }
   .wordmark b { color: var(--teal); font-weight: 700; }
   .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.12;
@@ -108,13 +108,7 @@
   <div class="hero-inner">
     <div>
       <div class="brand">
-        <svg viewBox="0 0 44 44" aria-hidden="true">
-          <rect x="2" y="2" width="40" height="40" rx="10" fill="none" stroke="#17a2b8" stroke-width="2.5"/>
-          <circle cx="15" cy="15" r="3.6" fill="#17a2b8"/>
-          <circle cx="30" cy="17" r="3.6" fill="#17a2b8"/>
-          <circle cx="22" cy="31" r="3.6" fill="#17a2b8"/>
-          <path d="M17.6 16.4 L27.4 16.9 M16.6 18 20.5 28 M28.6 20 24 28.4" stroke="#17a2b8" stroke-width="1.6" stroke-linecap="round"/>
-        </svg>
+        <img src="/logo.png" alt="OnlyHumans logo" width="44" height="44" style="border-radius:10px">
         <span class="wordmark">only<b>humans</b></span>
       </div>
       <h1>Chat that never passes through <em>a server</em>.</h1>
@@ -195,7 +189,7 @@
     <div class="feature">
       <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2.5" stroke="#17a2b8" stroke-width="1.7"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#17a2b8" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="1.6" fill="#17a2b8"/></svg>
       <h3>Code-word rooms</h3>
-      <p>Type a code at the door and you're in a room with everyone who uses the same word. The room is derived on each device — the word itself is never transmitted.</p>
+      <p>Type a code at the door and you're in a room with everyone who uses the same word. The room is derived on each device — the word itself is never transmitted. <b>+ New room</b> in the app opens a parallel window with its own name and code, side by side with the room you're in.</p>
     </div>
   </div>
 
@@ -267,11 +261,7 @@
 
 <footer>
   <div class="brand" style="justify-content:center; margin-bottom:.4rem">
-    <svg viewBox="0 0 44 44" style="width:20px;height:20px" aria-hidden="true">
-      <rect x="2" y="2" width="40" height="40" rx="10" fill="none" stroke="#17a2b8" stroke-width="2.5"/>
-      <circle cx="15" cy="15" r="3.6" fill="#17a2b8"/><circle cx="30" cy="17" r="3.6" fill="#17a2b8"/><circle cx="22" cy="31" r="3.6" fill="#17a2b8"/>
-      <path d="M17.6 16.4 L27.4 16.9 M16.6 18 20.5 28 M28.6 20 24 28.4" stroke="#17a2b8" stroke-width="1.6" stroke-linecap="round"/>
-    </svg>
+    <img src="/logo.png" alt="" width="20" height="20" style="border-radius:5px">
     <span class="wordmark" style="font-size:1rem">only<b>humans</b></span>
   </div>
   onlyhumans.deepflux.space — no trackers, no cookies, no third-party requests.
