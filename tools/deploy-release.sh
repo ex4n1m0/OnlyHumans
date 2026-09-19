@@ -38,6 +38,19 @@ node -e '
 sed -i "s/^version = \"$cur\"/version = \"$new\"/" src-tauri/Cargo.toml core/Cargo.toml
 npm version "$new" --no-git-tag-version --allow-same-version >/dev/null
 
+# --- 1b. mint a FRESH channel key per release ------------------------------
+# Policy: every version is its own room — a new base key with every bump
+# means old and new builds never mix (the site tells users to update).
+# OH_KEEP_KEY=1 reuses the existing key (re-shipping / patching a release).
+if [ "${OH_KEEP_KEY:-0}" != "1" ]; then
+  mkdir -p secrets
+  A=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  B=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+  printf '# Release-channel global key - minted %s (fresh per release: every version is its own room).\n# Two XOR shares (secret = A xor B); never commit this file.\nexport OH_GK_A=%s\nexport OH_GK_B=%s\n' \
+    "$(date +%F)" "$A" "$B" > secrets/release-gk.env
+  echo "deploy: minted fresh channel key for $new"
+fi
+
 # --- 2. build with the release-channel key (release-build.sh ritual) -----
 . ./tools/release-build.sh
 BUNDLE_DIR="target/release/bundle"
