@@ -269,12 +269,19 @@
     minutes, expiring after five. The hub can count tokens — it can never
     tie one to a name, a peer, or a room, and it stores nothing else. The
     app shows the same link as a green dot in its header.</p>
+    <p style="margin-top:.7rem">When two members can't reach each other
+    directly, their sealed envelopes wait in a signed hub inbox and drain
+    through this site — within a minute or two — so delivery no longer
+    needs both sides online at once. The inbox carries only ciphertext;
+    the recipient verifies every sender, and the hub still can't read,
+    forge, or alter a single word.</p>
   </div>
 
   <h2>Status</h2>
   <p>Early development — M3 field trials. The hub API lives at
   <code>/api/reg</code>, <code>/api/lookup/&lt;peerId&gt;</code>,
-  <code>/api/room/&lt;roomId&gt;</code> and <code>/api/presence</code>.</p>
+  <code>/api/room/&lt;roomId&gt;</code>, <code>/api/presence</code> and
+  <code>/api/inbox</code>.</p>
 
   <h2>Contact &amp; source</h2>
   <p>Development happens at
