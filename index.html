@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnlyHumans — encrypted chat between humans, no message servers</title>
 <meta name="description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub and a sealed fallback mailbox.">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#0e1518">
 <link rel="canonical" href="https://onlyhumans.deepflux.space/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://onlyhumans.deepflux.space/">
@@ -22,20 +22,20 @@
 </script>
 <style>
   :root {
-    --gold: #e6c075; --gold-deep: #a8853f; --gold-dim: #2a2212;
+    --teal: #17a2b8; --teal-deep: #0d6e79; --teal-dim: #0c2f37;
     --green: #22c55e; --amber: #f59e0b; --violet: #8b5cf6;
-    --bg: #000000; --panel: #0f0d08; --line: #2e2614;
-    --ink: #ece5d3; --muted: #a49a82;
+    --bg: #0e1518; --panel: #14202a; --line: #1f3038;
+    --ink: #d8e4e8; --muted: #8fa6b0;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--bg); color: var(--ink); }
-  a { color: var(--gold); }
-  :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  a { color: var(--teal); }
+  :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
   .skip-link { position: absolute; left: -999px; top: 0; z-index: 100;
-               background: var(--gold-deep); color: #faf6ea; padding: .6rem 1.1rem;
+               background: var(--teal-deep); color: #fff; padding: .6rem 1.1rem;
                border-radius: 0 0 10px 0; font-size: .9rem; text-decoration: none; }
   .skip-link:focus { left: 0; }
   main h2[id] { scroll-margin-top: 4.2rem; }
@@ -45,13 +45,13 @@
     position: sticky; top: 0; z-index: 50;
     display: flex; align-items: center; gap: 1.2rem;
     padding: .7rem 1.4rem;
-    background: rgba(0, 0, 0, .92); backdrop-filter: blur(8px);
+    background: rgba(14, 21, 24, .92); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--line);
   }
   nav .brand { display: flex; align-items: center; gap: .55rem; }
   nav .brand img { width: 26px; height: 26px; border-radius: 6px; }
-  nav .wordmark { font-weight: 700; color: #faf6ea; font-size: 1rem; }
-  nav .wordmark b { color: var(--gold); }
+  nav .wordmark { font-weight: 700; color: #fff; font-size: 1rem; }
+  nav .wordmark b { color: var(--teal); }
   nav .links { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
   nav .links a { color: var(--muted); text-decoration: none; font-size: .92rem;
                  padding: .35rem 0; }
@@ -74,8 +74,8 @@
   .hero {
     position: relative; overflow: hidden;
     background:
-      radial-gradient(ellipse 60% 80% at 75% 20%, rgba(230,192,117,.16), transparent 60%),
-      radial-gradient(ellipse 50% 60% at 15% 85%, rgba(168,133,63,.12), transparent 60%),
+      radial-gradient(ellipse 60% 80% at 75% 20%, rgba(23,162,184,.16), transparent 60%),
+      radial-gradient(ellipse 50% 60% at 15% 85%, rgba(13,110,121,.12), transparent 60%),
       var(--bg);
     border-bottom: 1px solid var(--line);
     padding: 4rem 1.5rem 3.4rem;
@@ -84,34 +84,34 @@
                 align-items: center; justify-content: space-between; flex-wrap: wrap; }
   .hero-inner > div:first-child { flex: 1 1 460px; min-width: 0; }
   .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.12;
-             color: #faf6ea; margin: 1.1rem 0 1rem; max-width: 22ch; }
-  .hero h1 em { font-style: normal; color: var(--gold); }
-  .hero p.lead { font-size: 1.12rem; line-height: 1.6; color: #cfc6ae; max-width: 46ch; }
+             color: #fff; margin: 1.1rem 0 1rem; max-width: 22ch; }
+  .hero h1 em { font-style: normal; color: var(--teal); }
+  .hero p.lead { font-size: 1.12rem; line-height: 1.6; color: #a9bcc4; max-width: 46ch; }
   .hero-live { margin: 1.4rem 0 0; font-size: 1.05rem; color: var(--ink); }
-  .hero-live b { color: #faf6ea; font-size: 1.45rem; }
+  .hero-live b { color: #fff; font-size: 1.45rem; }
   .hero-live .live-dot { display: inline-block; width: 10px; height: 10px; margin-right: .5rem; }
   .hero-live.zero b { color: var(--muted); font-weight: 500; font-size: 1.05rem; }
 
   .dl-box { margin-top: 1.8rem; display: flex; flex-direction: column; gap: .55rem; }
   a.dl {
     display: inline-flex; align-items: center; gap: .7rem; width: fit-content;
-    background: linear-gradient(135deg, var(--gold), var(--gold-deep));
-    color: #1c1503; padding: .85rem 1.6rem; border-radius: 10px;
+    background: linear-gradient(135deg, var(--teal), var(--teal-deep));
+    color: #fff; padding: .85rem 1.6rem; border-radius: 10px;
     text-decoration: none; font-weight: 600; font-size: 1.05rem;
-    box-shadow: 0 6px 24px rgba(230,192,117,.25);
+    box-shadow: 0 6px 24px rgba(23,162,184,.25);
     transition: transform .12s ease, box-shadow .12s ease;
   }
-  a.dl:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(230,192,117,.35); }
-  a.dl.alt { background: var(--panel); border: 1px solid var(--gold-deep); color: var(--gold);
+  a.dl:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(23,162,184,.35); }
+  a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
              box-shadow: none; margin-top: .55rem; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .dl-note { font-size: .85rem; color: var(--muted); max-width: 46ch; line-height: 1.5; }
 
   .mesh { flex: 0 0 auto; width: min(360px, 80vw); }
-  .mesh .node { fill: var(--gold); }
-  .mesh .hub  { fill: #57481f; }
-  .mesh .edge { stroke: #4d3f1a; stroke-width: 1.5; }
-  .mesh .edge.hot { stroke: var(--gold); }
+  .mesh .node { fill: var(--teal); }
+  .mesh .hub  { fill: #33505c; }
+  .mesh .edge { stroke: #2a4a56; stroke-width: 1.5; }
+  .mesh .edge.hot { stroke: var(--teal); }
   @media (prefers-reduced-motion: no-preference) {
     .mesh .pulse { animation: pulse 3.2s ease-in-out infinite; transform-origin: center; }
     .mesh .pulse:nth-child(2) { animation-delay: 1.1s; }
@@ -121,16 +121,16 @@
 
   /* ---------- sections ---------- */
   main { max-width: 1000px; margin: 0 auto; padding: 2.6rem 1.5rem; }
-  main h2 { color: #faf6ea; margin: 2.4rem 0 .8rem; font-size: 1.3rem; }
+  main h2 { color: #fff; margin: 2.4rem 0 .8rem; font-size: 1.3rem; }
   main p, main li { line-height: 1.65; }
-  code { background: var(--gold-dim); padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+  code { background: var(--teal-dim); padding: 2px 6px; border-radius: 4px; font-size: .9em; }
 
   .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
            gap: 1rem; }
   .proof .stat { background: var(--panel); border: 1px solid var(--line);
                  border-radius: 12px; padding: 1.2rem 1.3rem; }
-  .proof .n { font-size: 2rem; font-weight: 700; color: var(--gold); }
-  .proof .t { color: #faf6ea; font-weight: 600; margin: .2rem 0 .3rem; }
+  .proof .n { font-size: 2rem; font-weight: 700; color: var(--teal); }
+  .proof .t { color: #fff; font-weight: 600; margin: .2rem 0 .3rem; }
   .proof .d { color: var(--muted); font-size: .9rem; line-height: 1.5; }
 
   /* gallery as a 3-step story */
@@ -144,7 +144,7 @@
                      color: var(--muted); line-height: 1.55; }
   .shot figcaption b { color: var(--ink); }
   .stepnum { display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
-             background: var(--gold-dim); color: var(--gold); font-weight: 700;
+             background: var(--teal-dim); color: var(--teal); font-weight: 700;
              align-items: center; justify-content: center; font-size: .8rem;
              margin-right: .4rem; }
   .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
@@ -158,21 +158,21 @@
     border-radius: 999px; padding: .45rem 1.1rem; font-size: .92rem; cursor: pointer;
   }
   .layer-tabs button[aria-selected="true"] {
-    color: #faf6ea; border-color: var(--gold-deep); background: var(--gold-dim);
+    color: #fff; border-color: var(--teal-deep); background: var(--teal-dim);
   }
   .layer { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
            padding: 1.2rem 1.4rem; }
-  .layer h3 { color: #faf6ea; font-size: 1rem; margin-bottom: .4rem; }
-  .layer p { color: #cfc6ae; font-size: .95rem; }
-  .layer .tag { color: var(--gold); font-family: ui-monospace, Consolas, monospace;
+  .layer h3 { color: #fff; font-size: 1rem; margin-bottom: .4rem; }
+  .layer p { color: #a9bcc4; font-size: .95rem; }
+  .layer .tag { color: var(--teal); font-family: ui-monospace, Consolas, monospace;
                 font-size: .8rem; }
 
   /* security tiers */
   .tier { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
           padding: 1.2rem 1.4rem; margin: .7rem 0; }
-  .tier h3 { font-size: 1.02rem; margin-bottom: .5rem; color: #faf6ea; }
+  .tier h3 { font-size: 1.02rem; margin-bottom: .5rem; color: #fff; }
   .tier ul { list-style: none; }
-  .tier li { padding: .25rem 0 .25rem 1.6rem; position: relative; color: #cfc6ae;
+  .tier li { padding: .25rem 0 .25rem 1.6rem; position: relative; color: #a9bcc4;
              font-size: .93rem; }
   .tier li::before { position: absolute; left: 0; font-weight: 700; }
   .tier.ok li::before { content: "✔"; color: var(--green); }
@@ -183,15 +183,15 @@
   /* faq */
   details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
             padding: .8rem 1.1rem; margin: .5rem 0; }
-  details summary { cursor: pointer; color: #faf6ea; font-weight: 600; font-size: .97rem;
+  details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem;
                     padding: .35rem 0; }
-  details p { color: #cfc6ae; font-size: .93rem; margin-top: .5rem; }
+  details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
 
   /* changelog */
   .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; }
   .cl div { margin: .55rem 0; }
-  .cl b { color: var(--gold); font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
-  .cl span { color: #cfc6ae; font-size: .92rem; }
+  .cl b { color: var(--teal); font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
+  .cl span { color: #a9bcc4; font-size: .92rem; }
 
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.6rem;
            text-align: center; font-size: .85rem; color: var(--muted); line-height: 1.7; }
@@ -253,7 +253,7 @@
       <div class="dl-box">
         <a class="dl" id="dl-btn" href="/download/OnlyHumans-Setup-1.0.14.exe" download>
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="#1c1503" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
           <span id="dl-label">Download for Windows</span>
         </a>
@@ -284,13 +284,13 @@
         <circle class="node" cx="40" cy="190" r="9"/>
         <circle class="hub" cx="330" cy="300" r="6"/>
         <path class="edge" d="M320 170 L330 300" stroke-dasharray="4 4"/>
-        <text x="300" y="288" fill="#a49a82" font-size="10" font-family="monospace">hub</text>
+        <text x="300" y="288" fill="#8fa6b0" font-size="10" font-family="monospace">hub</text>
       </g>
       <g class="pulse">
-        <circle class="node" cx="110" cy="90" r="20" fill="none" stroke="#e6c075" opacity=".5"/>
+        <circle class="node" cx="110" cy="90" r="20" fill="none" stroke="#17a2b8" opacity=".5"/>
       </g>
       <g class="pulse">
-        <circle class="node" cx="180" cy="220" r="20" fill="none" stroke="#e6c075" opacity=".5"/>
+        <circle class="node" cx="180" cy="220" r="20" fill="none" stroke="#17a2b8" opacity=".5"/>
       </g>
     </svg>
   </div>
