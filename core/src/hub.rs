@@ -39,6 +39,64 @@ struct PresenceResp {
     online: u64,
 }
 
+/// One queued envelope in the site mailbox: an opaque, end-to-end sealed
+/// Envelope JSON plus the sender's signature. The hub verifies the
+/// signature before storing; the recipient verifies it AGAIN and checks
+/// that the included key derives the claimed sender id, so the hub
+/// remains untrusted storage for mail exactly as for addresses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MailItem {
+    pub to: String,
+    pub from: String,
+    pub public_key_b64: String,
+    pub env_json: String,
+    pub ts_ms: u64,
+    pub sig_b64: String,
+}
+
+/// Canonical bytes a sender signs for one mailbox item.
+pub fn mail_canonical(from: &str, to: &str, ts_ms: u64, env_json: &str) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(b"OH1-mail-v1|");
+    v.extend_from_slice(from.as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(to.as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(ts_ms.to_string().as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(env_json.as_bytes());
+    v
+}
+
+/// Canonical bytes a peer signs to authorize draining its own inbox.
+fn drain_canonical(peer: &str, ts_ms: u64) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(b"OH1-drain-v1|");
+    v.extend_from_slice(peer.as_bytes());
+    v.push(b'|');
+    v.extend_from_slice(ts_ms.to_string().as_bytes());
+    v
+}
+
+/// Full recipient-side verification of a drained item: the signature must
+/// verify under the included libp2p public key, and that key must derive
+/// exactly the claimed sender peer id. Returns the verified sender.
+pub fn verify_mail_item(item: &MailItem) -> anyhow::Result<libp2p::PeerId> {
+    let pub_bytes = crate::crypto::base64_decode(&item.public_key_b64)?;
+    let sig = crate::crypto::base64_decode(&item.sig_b64)?;
+    let key = libp2p::identity::PublicKey::try_decode_protobuf(&pub_bytes)
+        .map_err(|_| anyhow::anyhow!("mail item: bad public key protobuf"))?;
+    let derived = key.to_peer_id();
+    if derived.to_string() != item.from {
+        anyhow::bail!("mail item: key does not derive the claimed sender");
+    }
+    let canon = mail_canonical(&item.from, &item.to, item.ts_ms, &item.env_json);
+    if !Identity::verify(&pub_bytes, &canon, &sig) {
+        anyhow::bail!("mail item: signature verification failed");
+    }
+    Ok(derived)
+}
+
 fn room_canonical(room_id: &str, host: &str, pub_b64: &str, ts_ms: u64) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(b"OH1-room|");
@@ -157,6 +215,59 @@ impl HubClient {
         Ok(())
     }
 
+    /// Queue sealed envelopes for a peer we cannot reach directly. Items
+    /// are signed by us; the peer drains them on its next hub cycle.
+    pub async fn mail_push(&self, id: &Identity, to: &str, envelopes: &[crate::rooms::Envelope]) -> anyhow::Result<()> {
+        let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let pub_b64 = crate::crypto::base64_encode(&id.public_key_bytes());
+        let from = id.id_string();
+        let mut items = Vec::with_capacity(envelopes.len());
+        for env in envelopes {
+            let env_json = serde_json::to_string(env)?;
+            let sig = id.sign(&mail_canonical(&from, to, ts_ms, &env_json))?;
+            items.push(MailItem {
+                to: to.to_string(),
+                from: from.clone(),
+                public_key_b64: pub_b64.clone(),
+                env_json,
+                ts_ms,
+                sig_b64: crate::crypto::base64_encode(&sig),
+            });
+        }
+        let resp = self
+            .http
+            .post(format!("{}/api/inbox", self.base))
+            .json(&serde_json::json!({ "items": items }))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("mail push failed: {} {}", resp.status(), resp.text().await.unwrap_or_default());
+        }
+        Ok(())
+    }
+
+    /// Drain our mailbox (requires our signature, so only we can read it).
+    pub async fn mail_drain(&self, id: &Identity) -> anyhow::Result<Vec<MailItem>> {
+        let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
+        let peer = id.id_string();
+        let sig = crate::crypto::base64_encode(&id.sign(&drain_canonical(&peer, ts_ms))?);
+        let resp = self
+            .http
+            .get(format!("{}/api/inbox/{peer}?ts_ms={ts_ms}&sig_b64={sig}", self.base))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("mail drain failed: {} {}", resp.status(), resp.text().await.unwrap_or_default());
+        }
+        #[derive(serde::Deserialize, Default)]
+        struct DrainResp {
+            #[serde(default)]
+            items: Vec<MailItem>,
+        }
+        let r: DrainResp = resp.json().await.unwrap_or_default();
+        Ok(r.items)
+    }
+
     /// Look up a peer; returns None if unknown/expired. Signatures are
     /// verified locally before returning (the hub is untrusted storage).
     pub async fn lookup(&self, peer_id: &str) -> anyhow::Result<Option<Registration>> {
@@ -262,5 +373,72 @@ mod tests {
         let canon2 = canonical(&id.id_string(), &pub_b64, &["/ip4/9.9.9.9".to_string()], ts);
         assert!(!Identity::verify(&id.public_key_bytes(), &canon2, &sig));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod mail_tests {
+    use super::*;
+
+    fn tmp_identity(tag: &str) -> (Identity, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("oh-mail-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        (Identity::load_or_create(&dir).unwrap(), dir)
+    }
+
+    fn item_from(id: &Identity, to: &str, env_json: &str) -> MailItem {
+        let ts = 1234567890u64;
+        let from = id.id_string();
+        let sig = id.sign(&mail_canonical(&from, to, ts, env_json)).unwrap();
+        MailItem {
+            to: to.to_string(),
+            from,
+            public_key_b64: crate::crypto::base64_encode(&id.public_key_bytes()),
+            env_json: env_json.to_string(),
+            ts_ms: ts,
+            sig_b64: crate::crypto::base64_encode(&sig),
+        }
+    }
+
+    #[test]
+    fn mail_item_verifies_and_derives_sender() {
+        let (id, dir) = tmp_identity("ok");
+        let item = item_from(&id, "12D3KooWTargetTargetTargetTargetTargetTarge", r#"{"Ack":"Ack"}"#);
+        let from = verify_mail_item(&item).unwrap();
+        assert_eq!(from, id.peer_id());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn tampered_envelope_fails() {
+        let (id, dir) = tmp_identity("tamper");
+        let mut item = item_from(&id, "12D3KooWTargetTargetTargetTargetTargetTarge", r#"{"Ack":"Ack"}"#);
+        item.env_json = r#"{"Join":{}}"#.to_string();
+        assert!(verify_mail_item(&item).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn foreign_key_claiming_an_id_fails() {
+        // Signed by A, but claims to be B: the key must derive `from`.
+        let (a, da) = tmp_identity("signer");
+        let (b, db) = tmp_identity("claimed");
+        let mut item = item_from(&a, "12D3KooWTargetTargetTargetTargetTargetTarge", r#"{"Ack":"Ack"}"#);
+        item.from = b.id_string();
+        assert!(verify_mail_item(&item).is_err());
+        let _ = std::fs::remove_dir_all(da);
+        let _ = std::fs::remove_dir_all(db);
+    }
+
+    #[test]
+    fn mail_item_json_field_names_are_snake_case() {
+        // The wire contract with api/inbox.ts (Rust->TS field gotcha).
+        let (id, dir) = tmp_identity("serde");
+        let item = item_from(&id, "peer-x", "{}");
+        let j = serde_json::to_string(&item).unwrap();
+        for f in ["\"to\"", "\"from\"", "\"public_key_b64\"", "\"env_json\"", "\"ts_ms\"", "\"sig_b64\""] {
+            assert!(j.contains(f), "missing {f} in {j}");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

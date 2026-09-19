@@ -776,6 +776,10 @@ impl Rooms {
             .unwrap()
             .members
             .keys()
+            // Never address ourselves: a self-addressed broadcast would
+            // queue forever offline (and, via the site mailbox, be mailed
+            // back to our own inbox).
+            .filter(|m| m.as_str() != self.my_id())
             .filter_map(|m| m.parse().ok())
             .collect();
         peers

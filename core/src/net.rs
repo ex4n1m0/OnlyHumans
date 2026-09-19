@@ -346,6 +346,11 @@ pub async fn spawn(
     let mut circuit_addrs: Vec<Multiaddr> = Vec::new();
     let mut outbox: HashMap<PeerId, VecDeque<Envelope>> = HashMap::new();
     let mut connected: HashMap<PeerId, bool> = HashMap::new();
+    /// Consecutive ticks a peer's outbox went undelivered while offline;
+    /// after two, the queue moves to the site mailbox.
+    let mut mail_wait: HashMap<PeerId, u32> = HashMap::new();
+    /// Shadow of envelopes handed to send_request (see track_inflight).
+    let mut inflight: HashMap<PeerId, VecDeque<Envelope>> = HashMap::new();
 
     // Automatic join orchestration.
     let mut join_target: Option<PeerId> = None;
@@ -411,6 +416,7 @@ pub async fn spawn(
                         &identity,
                         &hub,
                         &mut outbox,
+                        &mut inflight,
                         &cfg,
                         &mut event_tx,
                     ).await;
@@ -425,6 +431,9 @@ pub async fn spawn(
                             // full period out.
                             hub_interval.reset();
                             beat_presence(&hub, &presence_token, &event_tx).await;
+                            // Fresh start: pick up anything that queued
+                            // for us while we were away.
+                            drain_mailbox(&mut swarm, &mut rooms, &store, &mut outbox, &mut inflight, &identity, &hub, &event_tx).await;
                         }
                         Err(e) => {
                             let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
@@ -437,6 +446,7 @@ pub async fn spawn(
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
                     beat_presence(&hub, &presence_token, &event_tx).await;
+                    drain_mailbox(&mut swarm, &mut rooms, &store, &mut outbox, &mut inflight, &identity, &hub, &event_tx).await;
                     // Hosts refresh their room record alongside addresses
                     // so the election pointer never silently expires while
                     // they are alive.
@@ -480,15 +490,58 @@ pub async fn spawn(
                         &mut grace_left,
                         &mut announced,
                         &mut outbox,
+                        &mut inflight,
                         &store,
                         &mut event_tx,
                     ).await;
                     // Retry hub-based dials for peers with undelivered
                     // envelopes (messages queue up while a member is
-                    // offline).
+                    // offline). A peer still unreachable after a couple
+                    // of ticks gets its queue handed to the site mailbox
+                    // instead — sealed envelopes wait there until its
+                    // next drain, so delivery no longer depends on both
+                    // sides being simultaneously reachable.
                     for peer in outbox.keys().copied().collect::<Vec<_>>() {
                         if !swarm.is_connected(&peer) {
                             dial_peer(&mut swarm, &hub, &identity, peer, &cfg, &mut event_tx).await;
+                            if !swarm.is_connected(&peer) {
+                                let waited = mail_wait.entry(peer).or_insert(0);
+                                *waited += 1;
+                                if *waited >= 2 {
+                                    let n = outbox.get(&peer).map(|q| q.len()).unwrap_or(0);
+                                    if n > 0 {
+                                        let envs: Vec<Envelope> =
+                                            outbox.get_mut(&peer).map(|q| q.drain(..).collect()).unwrap_or_default();
+                                        match hub.mail_push(&identity, &peer.to_string(), &envs).await {
+                                            Ok(()) => {
+                                                mail_wait.remove(&peer);
+                                                let _ = event_tx.send(NodeEvent::Log {
+                                                    message: format!(
+                                                        "mailbox: {n} sealed envelope(s) queued via site for {}",
+                                                        &peer.to_string()[..12.min(peer.to_string().len())]
+                                                    ),
+                                                });
+                                            }
+                                            Err(e) => {
+                                                // Keep the envelopes queued; retry next tick.
+                                                let q = outbox.entry(peer).or_default();
+                                                for env in envs {
+                                                    q.push_back(env);
+                                                }
+                                                let _ = event_tx.send(NodeEvent::Log {
+                                                    message: format!("mailbox push: {e}"),
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        mail_wait.remove(&peer);
+                                    }
+                                }
+                            } else {
+                                mail_wait.remove(&peer);
+                            }
+                        } else {
+                            mail_wait.remove(&peer);
                         }
                     }
                 }
@@ -499,6 +552,7 @@ pub async fn spawn(
                         ev,
                         &store,
                         &mut outbox,
+                        &mut inflight,
                         &mut connected,
                         &mut relay_candidates,
                         &mut circuit_addrs,
@@ -523,12 +577,31 @@ fn enqueue(outbox: &mut HashMap<PeerId, VecDeque<Envelope>>, peer: PeerId, env: 
     q.push_back(env);
 }
 
-fn flush_outbox(swarm: &mut Swarm<Behaviour>, outbox: &mut HashMap<PeerId, VecDeque<Envelope>>, peer: PeerId) {
+/// Envelopes handed to send_request but not yet proven delivered. A
+/// send_request onto a connection that dies mid-flight FAILS silently
+/// after popping from the outbox — the shadow lets us put failed sends
+/// back (recipients' replay guards make the resulting duplicates
+/// harmless). Bounded like the outbox itself.
+fn track_inflight(inflight: &mut HashMap<PeerId, VecDeque<Envelope>>, peer: PeerId, env: Envelope) {
+    let q = inflight.entry(peer).or_default();
+    if q.len() > 64 {
+        q.pop_front();
+    }
+    q.push_back(env);
+}
+
+fn flush_outbox(
+    swarm: &mut Swarm<Behaviour>,
+    outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    peer: PeerId,
+) {
     if !swarm.is_connected(&peer) {
         return;
     }
     if let Some(q) = outbox.get_mut(&peer) {
         while let Some(env) = q.pop_front() {
+            track_inflight(inflight, peer, env.clone());
             swarm
                 .behaviour_mut()
                 .rooms
@@ -548,10 +621,11 @@ async fn flush_or_redial(
     cfg: &NodeConfig,
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
     outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
     peer: PeerId,
 ) {
     if swarm.is_connected(&peer) {
-        flush_outbox(swarm, outbox, peer);
+        flush_outbox(swarm, outbox, inflight, peer);
     } else {
         dial_peer(swarm, hub, identity, peer, cfg, event_tx).await;
     }
@@ -573,6 +647,58 @@ async fn beat_presence(
         Err(e) => {
             let _ = event_tx.send(NodeEvent::Presence { linked: false, online: 0 });
             let _ = event_tx.send(NodeEvent::Log { message: format!("presence: {e}") });
+        }
+    }
+}
+
+/// Drain our site mailbox and process every verified item exactly like a
+/// direct request. Outgoing replies land in the outbox; if the peer is
+/// still unreachable the tick's mailbox handoff delivers them the same
+/// way (join-over-mailbox completes end to end).
+#[allow(clippy::too_many_arguments)]
+async fn drain_mailbox(
+    swarm: &mut Swarm<Behaviour>,
+    rooms: &mut Rooms,
+    store: &std::sync::Mutex<Store>,
+    outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    identity: &Identity,
+    hub: &HubClient,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+) {
+    let items = match hub.mail_drain(identity).await {
+        Ok(items) => items,
+        Err(e) => {
+            let _ = event_tx.send(NodeEvent::Log { message: format!("mailbox drain: {e}") });
+            return;
+        }
+    };
+    if items.is_empty() {
+        return;
+    }
+    let _ = event_tx.send(NodeEvent::Log {
+        message: format!("mailbox: drained {} item(s) from the site", items.len()),
+    });
+    for item in items {
+        let from = match crate::hub::verify_mail_item(&item) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = event_tx.send(NodeEvent::Log { message: format!("mailbox item rejected: {e}") });
+                continue;
+            }
+        };
+        let env: Envelope = match serde_json::from_str(&item.env_json) {
+            Ok(e) => e,
+            Err(e) => {
+                let _ = event_tx.send(NodeEvent::Log { message: format!("mailbox item unparsable: {e}") });
+                continue;
+            }
+        };
+        tracing::info!("mailbox item from {from}: {}", &item.env_json[..item.env_json.len().min(60)]);
+        let events = rooms.handle(from, env);
+        process_room_events(rooms, store, &from, &events, event_tx);
+        for ev in events {
+            dispatch_room_event(swarm, outbox, inflight, &from, ev, event_tx);
         }
     }
 }
@@ -708,6 +834,7 @@ async fn handle_command(
     identity: &Identity,
     hub: &HubClient,
     outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
     cfg: &NodeConfig,
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
 ) {
@@ -735,7 +862,7 @@ async fn handle_command(
                 if let Some(dm) = rooms.dm(&room) {
                     let peer = dm.peer;
                     enqueue(outbox, peer, Envelope::Chat { frame });
-                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, inflight, peer).await;
                     return;
                 }
                 for peer in rooms.member_peers() {
@@ -743,7 +870,7 @@ async fn handle_command(
                         continue;
                     }
                     enqueue(outbox, peer, Envelope::Chat { frame: frame.clone() });
-                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, inflight, peer).await;
                 }
             } else {
                 let _ = event_tx.send(NodeEvent::Log {
@@ -767,7 +894,7 @@ async fn handle_command(
                         continue;
                     }
                     enqueue(outbox, peer, Envelope::Rotate { frame: frame.clone() });
-                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, inflight, peer).await;
                 }
             } else {
                 let _ = event_tx.send(NodeEvent::Log {
@@ -788,7 +915,7 @@ async fn handle_command(
                 epoch: 1,
             });
             enqueue(outbox, pid, invite);
-            flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, pid).await;
+            flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, inflight, pid).await;
         }
         Command::ClearHistory => {
             if let Some(frame) = rooms.clear_envelope() {
@@ -801,7 +928,7 @@ async fn handle_command(
                         continue;
                     }
                     enqueue(outbox, peer, Envelope::Clear { frame: frame.clone() });
-                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, peer).await;
+                    flush_or_redial(swarm, hub, identity, cfg, event_tx, outbox, inflight, peer).await;
                 }
             } else {
                 let _ = event_tx.send(NodeEvent::Log {
@@ -866,6 +993,7 @@ async fn room_orchestration(
     grace_left: &mut Option<u32>,
     announced: &mut bool,
     outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
     store: &std::sync::Mutex<Store>,
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
 ) {
@@ -911,7 +1039,7 @@ async fn room_orchestration(
             if !rooms.is_host() {
                 let host = st.host;
                 enqueue(outbox, host, rooms.join_envelope());
-                flush_outbox(swarm, outbox, host);
+                flush_outbox(swarm, outbox, inflight, host);
             }
         }
         if !cfg.offline {
@@ -935,7 +1063,7 @@ async fn room_orchestration(
                 *join_target = Some(host);
                 if swarm.is_connected(&host) {
                     enqueue(outbox, host, rooms.join_envelope());
-                    flush_outbox(swarm, outbox, host);
+                    flush_outbox(swarm, outbox, inflight, host);
                 }
             }
         }
@@ -957,7 +1085,7 @@ async fn room_orchestration(
                 *join_target = Some(host);
                 if swarm.is_connected(&host) {
                     enqueue(outbox, host, rooms.join_envelope());
-                    flush_outbox(swarm, outbox, host);
+                    flush_outbox(swarm, outbox, inflight, host);
                 } else {
                     // Dial via the host's published addresses; retries on
                     // later ticks until the record or connection lands.
@@ -1076,6 +1204,7 @@ fn handle_swarm_event(
     ev: SwarmEvent<BehaviourEvent>,
     store: &std::sync::Mutex<Store>,
     outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
     connected: &mut HashMap<PeerId, bool>,
     relay_candidates: &mut HashMap<PeerId, Multiaddr>,
     circuit_addrs: &mut Vec<Multiaddr>,
@@ -1096,7 +1225,7 @@ fn handle_swarm_event(
                 peer: peer_id.to_string(),
                 connected: true,
             });
-            flush_outbox(swarm, outbox, peer_id);
+            flush_outbox(swarm, outbox, inflight, peer_id);
         }
         SwarmEvent::ConnectionClosed { peer_id, endpoint, num_established, cause, .. } => {
             tracing::info!("connection closed: {peer_id} via {endpoint:?} (remaining {num_established}) cause {cause:?}");
@@ -1132,7 +1261,7 @@ fn handle_swarm_event(
                         let events = rooms.handle(peer, request);
                         process_room_events(rooms, &store, &peer, &events, event_tx);
                         for ev in events {
-                            dispatch_room_event(swarm, outbox, &peer, ev, event_tx);
+                            dispatch_room_event(swarm, outbox, inflight, &peer, ev, event_tx);
                         }
                         // Always acknowledge requests.
                         let _ = swarm
@@ -1144,12 +1273,22 @@ fn handle_swarm_event(
                         let events = rooms.handle(peer, response);
                         process_room_events(rooms, &store, &peer, &events, event_tx);
                         for ev in events {
-                            dispatch_room_event(swarm, outbox, &peer, ev, event_tx);
+                            dispatch_room_event(swarm, outbox, inflight, &peer, ev, event_tx);
                         }
                     }
                 }
             }
             request_response::Event::OutboundFailure { peer, error, .. } => {
+                // The failed request consumed its envelope when it left
+                // the outbox — put the shadowed copies back so the tick
+                // retries (directly, or via the site mailbox while the
+                // peer is unreachable). Recipients dedupe by sequence.
+                if let Some(q) = inflight.remove(&peer) {
+                    let o = outbox.entry(peer).or_default();
+                    for env in q {
+                        o.push_front(env);
+                    }
+                }
                 let _ = event_tx.send(NodeEvent::Log {
                     message: format!("outbound to {peer} failed: {error}"),
                 });
@@ -1248,6 +1387,7 @@ fn process_room_events(
 fn dispatch_room_event(
     swarm: &mut Swarm<Behaviour>,
     outbox: &mut HashMap<PeerId, VecDeque<Envelope>>,
+    inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
     from: &PeerId,
     ev: RoomEvent,
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
@@ -1255,7 +1395,7 @@ fn dispatch_room_event(
     match ev {
         RoomEvent::Send { peer, envelope } => {
             enqueue(outbox, peer, envelope);
-            flush_outbox(swarm, outbox, peer);
+            flush_outbox(swarm, outbox, inflight, peer);
         }
         RoomEvent::RoomReady { room_id_hex, host, role, epoch } => {
             let _ = event_tx.send(NodeEvent::RoomReady {

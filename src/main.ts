@@ -506,7 +506,7 @@ async function boot() {
           ${offlineTargets().length ? `
           <div class="pending-strip">
             ⏱ ${offlineTargets().length === 1 ? escapeHtml(offlineTargets()[0]) + " is offline" : offlineTargets().length + " members are offline"}
-            — messages will be delivered when they return (while you stay online)
+            — messages wait sealed on the site and arrive when they're back (usually within a minute or two)
           </div>` : ""}
           <div class="composer">
             <input id="send-text" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" autocomplete="off" ${ready ? "" : "disabled"}>
