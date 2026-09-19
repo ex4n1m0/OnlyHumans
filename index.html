@@ -87,11 +87,11 @@
       var(--bg);
     border-bottom: 1px solid var(--line);
     display: flex; align-items: center; justify-content: center;
-    padding: 4.5rem 1.5rem;
+    padding: 5.5rem 1.5rem;
     min-height: calc(100vh - 4.4rem);
     min-height: calc(100svh - 4.4rem);
   }
-  .hero-inner { width: 100%; max-width: min(1600px, 92vw); margin: 0 auto;
+  .hero-inner { width: 100%; max-width: 80vw; margin: 0 auto;
                 display: flex; flex-direction: column; align-items: center;
                 text-align: center; }
   .hero-copy { display: flex; flex-direction: column; align-items: center;
@@ -100,24 +100,23 @@
                border-radius: 23%;
                box-shadow: 0 24px 96px rgba(23,162,184,.32); }
   .hero h1 { font-size: clamp(2rem, 1.2rem + 2vw, 4.45rem); line-height: 1.1;
-             color: #fff; margin: 1.6rem 0 1.1rem; max-width: 22ch;
-             text-wrap: balance; }
+             color: #fff; margin: 2.2rem 0 1.4rem; text-wrap: balance; }
   .hero h1 em { font-style: normal; color: var(--teal); }
   .hero p.lead { font-size: clamp(1.05rem, .95rem + .35vw, 1.5rem);
-                 line-height: 1.65; color: #a9bcc4; max-width: 46ch; }
-  .hero-live { margin: 1.4rem 0 0; font-size: 1.05rem; color: var(--ink); }
+                 line-height: 1.65; color: #a9bcc4; }
+  .hero-live { margin: 1.8rem 0 0; font-size: 1.05rem; color: var(--ink); }
   .hero-live b { color: #fff; font-size: 1.45rem; }
   .hero-live .live-dot { display: inline-block; width: 10px; height: 10px; margin-right: .5rem; }
   .hero-live.zero b { color: var(--muted); font-weight: 500; font-size: 1.05rem; }
 
-  .dl-box { margin-top: 1.9rem; display: flex; flex-direction: column; align-items: center; gap: .7rem; }
-  .dl-row { display: flex; gap: .9rem; flex-wrap: wrap; justify-content: center; }
+  .dl-box { margin-top: 2.6rem; display: flex; flex-direction: column; align-items: center; gap: .9rem; }
+  .dl-row { display: flex; gap: 1.1rem; flex-wrap: wrap; justify-content: center; }
   a.dl {
     display: inline-flex; align-items: center; gap: .7rem; width: fit-content;
     background: linear-gradient(135deg, var(--teal), var(--teal-deep));
-    color: #fff; padding: .9rem 1.9rem; border-radius: 10px;
+    color: #fff; padding: 1rem 2.2rem; border-radius: 10px;
     text-decoration: none; font-weight: 600;
-    font-size: clamp(1.05rem, 1rem + .2vw, 1.25rem);
+    font-size: clamp(1.05rem, 1rem + .25vw, 1.35rem);
     box-shadow: 0 6px 24px rgba(23,162,184,.25);
     transition: transform .12s ease, box-shadow .12s ease;
   }
@@ -125,8 +124,8 @@
   a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
              box-shadow: none; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
-  .dl-note { font-size: .85rem; color: var(--muted); max-width: 52ch; line-height: 1.6;
-             margin-top: .3rem; }
+  .dl-note { font-size: .85rem; color: var(--muted); line-height: 1.6;
+             margin-top: .5rem; }
 
   /* The mesh spans the whole hero behind the content at half opacity —
      the logo is the hero, the network is the atmosphere. */
