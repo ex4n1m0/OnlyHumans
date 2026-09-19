@@ -6,6 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number; pending?: boolean }
 interface Contact { peer_id: string; name: string }
 interface MemberInfo { peer: string; name: string }
+interface RoomSnapshot { status: string; room: string | null; host: string | null; weAreHost: boolean; epoch: number; members: MemberInfo[]; updatedMs: number }
 type NodeEvent =
   | { kind: "listening"; addr: string }
   | { kind: "joinStatus"; status: string }
@@ -197,7 +198,50 @@ async function boot() {
     void onNodeEvent(ev.payload);
   });
 
+  // Field-diagnostics: surface UI-side failures that would otherwise be
+  // invisible in release builds (a dead listener looks exactly like a
+  // broken network). Every listener crash lands on-screen + in the title.
+  const diag = (msg: string) => {
+    document.title = `! ${msg}`.slice(0, 120);
+    let box = document.getElementById("ui-diag");
+    if (!box) {
+      box = document.createElement("pre");
+      box.id = "ui-diag";
+      box.style.cssText = "position:fixed;bottom:0;left:0;right:0;z-index:99;max-height:40%;overflow:auto;margin:0;padding:6px 10px;background:#5b1a1a;color:#ffd7d7;font:11px/1.5 Consolas,monospace;white-space:pre-wrap";
+      document.body.appendChild(box);
+    }
+    box.textContent += `${new Date().toLocaleTimeString()} ${msg}\n`;
+  };
+  window.addEventListener("error", (e) => diag(`error: ${e.message} @${e.filename}:${e.lineno}`));
+  window.addEventListener("unhandledrejection", (e) => diag(`unhandled: ${String((e as PromiseRejectionEvent).reason)}`));
+
+  // Self-healing pull channel: the push events proved intermittently
+  // lossy between the shell and this webview (a dropped RoomReady froze
+  // the UI on "joining…" while the node was fully in the room). The
+  // shell mirrors the node's state on the pump — poll it and replay the
+  // same merge the events would run. Fast while joining, relaxed after.
+  let pollTick = 0;
+  setInterval(() => {
+    void (async () => {
+      pollTick++;
+      if (room !== null && pollTick % 6 !== 0) return;
+      try {
+        const s = await invoke<RoomSnapshot | null>("room_snapshot");
+        if (!s) return;
+        await onNodeEvent({ kind: "joinStatus", status: s.status });
+        if (s.room) {
+          await onNodeEvent({ kind: "roomReady", room: s.room, peer: s.host ?? "", weAreHost: s.weAreHost, epoch: s.epoch });
+          await onNodeEvent({ kind: "membersChanged", room: s.room, members: s.members ?? [] });
+          if (activeRoom !== null) await refreshMessages();
+        }
+      } catch {
+        /* node not running yet */
+      }
+    })();
+  }, 10_000);
+
   async function onNodeEvent(p: NodeEvent) {
+    try {
     switch (p.kind) {
       case "message": {
         if (p.room === room) {
@@ -281,6 +325,9 @@ async function boot() {
         break;
       case "listening":
         break;
+    }
+    } catch (e) {
+      diag(`node-event handler threw on kind=${(p as { kind: string }).kind}: ${String(e)}`);
     }
   }
 

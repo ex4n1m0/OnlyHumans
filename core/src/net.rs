@@ -89,8 +89,10 @@ async fn read_json<T: futures::AsyncRead + Unpin + Send>(io: &mut T) -> std::io:
     }
     let mut buf = vec![0u8; n];
     io.read_exact(&mut buf).await?;
-    serde_json::from_slice(&buf)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    let env: Envelope = serde_json::from_slice(&buf)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    tracing::info!("codec read ok: {} bytes: {}", buf.len(), String::from_utf8_lossy(&buf[..buf.len().min(90)]));
+    Ok(env)
 }
 
 async fn write_json<T: futures::AsyncWrite + Unpin + Send>(
@@ -99,6 +101,7 @@ async fn write_json<T: futures::AsyncWrite + Unpin + Send>(
 ) -> std::io::Result<()> {
     let bytes = serde_json::to_vec(env)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    tracing::info!("codec write: {} bytes: {}", bytes.len(), String::from_utf8_lossy(&bytes[..bytes.len().min(90)]));
     io.write_all(&(bytes.len() as u32).to_be_bytes()).await?;
     io.write_all(&bytes).await?;
     io.close().await?;
@@ -429,6 +432,7 @@ pub async fn spawn(
                     }
                 }
                 _ = hub_interval.tick(), if !cfg.offline && hub_registered => {
+                    tracing::debug!("tick: hub interval (register + presence + record refresh)");
                     if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), &mut observed_ip).await {
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
@@ -463,6 +467,7 @@ pub async fn spawn(
                     }
                 }
                 _ = room_tick.tick() => {
+                    tracing::debug!("tick: room orchestration");
                     room_orchestration(
                         &mut swarm,
                         &mut rooms,
@@ -1084,7 +1089,8 @@ fn handle_swarm_event(
             }
             let _ = event_tx.send(NodeEvent::Listening { addr: address.to_string() });
         }
-        SwarmEvent::ConnectionEstablished { peer_id, .. } => {
+        SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+            tracing::info!("connection established: {peer_id} via {endpoint:?}");
             connected.insert(peer_id, true);
             let _ = event_tx.send(NodeEvent::ConnectionStateChanged {
                 peer: peer_id.to_string(),
@@ -1092,7 +1098,8 @@ fn handle_swarm_event(
             });
             flush_outbox(swarm, outbox, peer_id);
         }
-        SwarmEvent::ConnectionClosed { peer_id, .. } => {
+        SwarmEvent::ConnectionClosed { peer_id, endpoint, num_established, cause, .. } => {
+            tracing::info!("connection closed: {peer_id} via {endpoint:?} (remaining {num_established}) cause {cause:?}");
             connected.insert(peer_id, false);
             let _ = event_tx.send(NodeEvent::ConnectionStateChanged {
                 peer: peer_id.to_string(),

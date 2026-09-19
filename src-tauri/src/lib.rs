@@ -12,6 +12,31 @@ struct AppState {
     /// Anonymous site-presence token for THIS process; the core heartbeats
     /// it and the shell removes it on exit/restart paths.
     presence_token: std::sync::OnceLock<String>,
+    /// Last-seen room state, mirrored by the event pump. The UI polls this
+    /// as a PULL channel: the push channel (webview events) proved
+    /// intermittently lossy in the field — a missed RoomReady froze the
+    /// UI on "joining" while the core was fully in the room. Polling the
+    /// pump's cache heals any missed event.
+    room_snap: Mutex<Option<RoomSnapshot>>,
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RoomSnapshot {
+    status: String,
+    room: Option<String>,
+    host: Option<String>,
+    we_are_host: bool,
+    epoch: u64,
+    members: Vec<onlyhumans_core::rooms::MemberInfo>,
+    updated_ms: u64,
+}
+
+/// The UI's self-healing pull: current room state straight from the
+/// pump-mirrored cache (see AppState::room_snap).
+#[tauri::command]
+fn room_snapshot(state: State<AppState>) -> Option<RoomSnapshot> {
+    state.room_snap.lock().unwrap().clone()
 }
 
 /// Remove our presence token from the site's online counter. Blocking by
@@ -259,7 +284,11 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
         // peer -> display name, for toast formatting (the shell otherwise
         // only sees raw peer ids)
         let mut names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        // Mirror of the room state for the UI's pull channel.
+        let mut snap_status = String::from("connecting");
+        let mut snap: Option<RoomSnapshot> = None;
         while let Some(ev) = rx.recv().await {
+            tracing::debug!("pump event: {ev:?}");
             match &ev {
                 NodeEvent::Log { message } => append_log(&log_dir, message),
                 NodeEvent::MembersChanged { members, .. } => {
@@ -273,6 +302,27 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
                     &log_dir,
                     &format!("conn {peer} {}", if *connected { "up" } else { "down" }),
                 ),
+                NodeEvent::JoinStatus { status } => {
+                    snap_status = status.clone();
+                }
+                NodeEvent::RoomReady { room, peer, we_are_host, epoch } => {
+                    snap_status = if *we_are_host { "hosting".into() } else { "connected".into() };
+                    snap = Some(RoomSnapshot {
+                        status: snap_status.clone(),
+                        room: Some(room.clone()),
+                        host: Some(peer.clone()),
+                        we_are_host: *we_are_host,
+                        epoch: *epoch,
+                        members: snap.as_ref().map(|s| s.members.clone()).unwrap_or_default(),
+                        updated_ms: now_ms(),
+                    });
+                }
+                NodeEvent::MembersChanged { members, .. } => {
+                    if let Some(s) = snap.as_mut() {
+                        s.members = members.clone();
+                        s.updated_ms = now_ms();
+                    }
+                }
                 NodeEvent::Listening { addr } => {
                     append_log(&log_dir, &format!("listening {addr}"))
                 }
@@ -319,8 +369,30 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
                 }
             }
             let _ = app_handle.emit("node-event", &ev);
+            // Publish the pull-channel snapshot after every event.
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                let mut s = snap.clone().unwrap_or(RoomSnapshot {
+                    status: snap_status.clone(),
+                    room: None,
+                    host: None,
+                    we_are_host: false,
+                    epoch: 1,
+                    members: Vec::new(),
+                    updated_ms: now_ms(),
+                });
+                s.status = snap_status.clone();
+                s.updated_ms = now_ms();
+                *state.room_snap.lock().unwrap() = Some(s);
+            }
         }
     });
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[tauri::command]
@@ -492,6 +564,14 @@ fn register_toast_identity(icon_png: &std::path::Path) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // OH_TRACE=1 (+ RUST_LOG) turns on libp2p/core internals on stderr —
+    // the release app otherwise shows nothing below NodeEvent level.
+    if std::env::var_os("OH_TRACE").is_some() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_target(true)
+            .try_init();
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
@@ -547,6 +627,7 @@ pub fn run() {
                 node: Mutex::new(None),
                 my_id: my_id.clone(),
                 presence_token: std::sync::OnceLock::new(),
+                room_snap: Mutex::new(None),
             });
 
             // The node only starts once a username exists (the UI gates
