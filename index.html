@@ -78,9 +78,9 @@
       radial-gradient(ellipse 50% 60% at 15% 85%, rgba(13,110,121,.12), transparent 60%),
       var(--bg);
     border-bottom: 1px solid var(--line);
-    padding: 4rem 1.5rem 3.4rem;
+    padding: 5rem 1.5rem 4.2rem;
   }
-  .hero-inner { max-width: 860px; margin: 0 auto; display: flex; flex-direction: column;
+  .hero-inner { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column;
                 align-items: center; text-align: center; }
   .hero-logo { width: 224px; height: 224px; border-radius: 52px;
                box-shadow: 0 16px 64px rgba(23,162,184,.22); }
@@ -122,12 +122,12 @@
   }
 
   /* ---------- sections ---------- */
-  main { max-width: 1000px; margin: 0 auto; padding: 2.6rem 1.5rem; }
+  main { max-width: 1160px; margin: 0 auto; padding: 2.8rem 1.5rem; }
   main h2 { color: #fff; margin: 2.4rem 0 .8rem; font-size: 1.3rem; }
   main p, main li { line-height: 1.65; }
   code { background: var(--teal-dim); padding: 2px 6px; border-radius: 4px; font-size: .9em; }
 
-  .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
            gap: 1rem; }
   .proof .stat { background: var(--panel); border: 1px solid var(--line);
                  border-radius: 12px; padding: 1.2rem 1.3rem; }
@@ -136,7 +136,7 @@
   .proof .d { color: var(--muted); font-size: .9rem; line-height: 1.5; }
 
   /* gallery as a 3-step story */
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
            gap: 1rem; margin: .5rem 0 1rem; }
   .shot { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
           overflow: hidden; }
@@ -149,7 +149,7 @@
              background: var(--teal-dim); color: var(--teal); font-weight: 700;
              align-items: center; justify-content: center; font-size: .8rem;
              margin-right: .4rem; }
-  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr));
           gap: 1rem; }
 
   /* how it works: layer toggle */
@@ -163,15 +163,18 @@
     color: #fff; border-color: var(--teal-deep); background: var(--teal-dim);
   }
   .layer { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-           padding: 1.2rem 1.4rem; }
+           padding: 1.5rem 1.7rem; }
   .layer h3 { color: #fff; font-size: 1rem; margin-bottom: .4rem; }
-  .layer p { color: #a9bcc4; font-size: .95rem; }
+  .layer p { color: #a9bcc4; font-size: .95rem; max-width: 82ch; }
   .layer .tag { color: var(--teal); font-family: ui-monospace, Consolas, monospace;
                 font-size: .8rem; }
 
   /* security tiers */
   .tier { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-          padding: 1.2rem 1.4rem; margin: .7rem 0; }
+          padding: 1.4rem 1.5rem; margin: 0; }
+  .tier-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr));
+               gap: .8rem; align-items: start; margin-top: .8rem; }
+  main > p { max-width: 80ch; }
   .tier h3 { font-size: 1.02rem; margin-bottom: .5rem; color: #fff; }
   .tier ul { list-style: none; }
   .tier li { padding: .25rem 0 .25rem 1.6rem; position: relative; color: #a9bcc4;
@@ -184,13 +187,15 @@
 
   /* faq */
   details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-            padding: .8rem 1.1rem; margin: .5rem 0; }
+            padding: .9rem 1.2rem; margin: 0; }
+  .faq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
+              gap: .5rem; margin-top: .6rem; }
   details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem;
                     padding: .35rem 0; }
   details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
 
   /* changelog */
-  .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; }
+  .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; max-width: 900px; }
   .cl div { margin: .55rem 0; }
   .cl b { color: var(--teal); font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
   .cl span { color: #a9bcc4; font-size: .92rem; }
@@ -406,6 +411,7 @@
   <h2 id="security">Security, honestly</h2>
   <p>Not "military-grade" adjectives — a graded model of what this app
   actually protects, what it reveals, and what it doesn't claim to solve.</p>
+  <div class="tier-grid">
   <div class="tier ok">
     <h3>Protected</h3>
     <ul>
@@ -436,8 +442,10 @@
       <li>Global traffic analysis: metadata-resistant routing is not implemented</li>
     </ul>
   </div>
+  </div>
 
   <h2 id="faq">Questions friends actually ask</h2>
+  <div class="faq-grid">
   <details name="faq">
     <summary>Do I need an account?</summary>
     <p>No. Install, type any name, you're in. Your identity is a key generated
@@ -485,6 +493,7 @@
     <p>Not yet — Windows and Linux today, Android is planned. The desktop UI
     is already designed to adapt.</p>
   </details>
+  </div>
 
   <h2 id="changelog">Changelog</h2>
   <div class="cl">
