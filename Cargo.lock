@@ -3888,6 +3888,7 @@ version = "1.0.9"
 dependencies = [
  "notify-rust",
  "onlyhumans_core",
+ "reqwest",
  "serde",
  "serde_json",
  "tauri",
@@ -4651,6 +4652,7 @@ checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
  "base64 0.23.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",

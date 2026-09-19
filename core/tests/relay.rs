@@ -30,6 +30,7 @@ async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> 
             NodeEvent::Rotated { .. } => "rotated",
             NodeEvent::ConnectionStateChanged { .. } => "conn",
             NodeEvent::Log { .. } => "log",
+            NodeEvent::Presence { .. } => "presence",
         };
         eprintln!("  [{want}] {kind}: {ev:?}");
         if kind == want {

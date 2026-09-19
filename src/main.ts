@@ -15,6 +15,7 @@ type NodeEvent =
   | { kind: "messagesCleared"; room: string }
   | { kind: "rotated"; room: string; newEpoch: number }
   | { kind: "connectionStateChanged"; peer: string; connected: boolean }
+  | { kind: "presence"; linked: boolean; online: number }
   | { kind: "log"; message: string };
 
 const app = document.getElementById("app")!;
@@ -147,6 +148,31 @@ async function boot() {
   const codeRoom: boolean = await invoke("has_passcode");
   let messages: ChatMessage[] = [];
 
+  // Site link (anonymous presence beacon): green = the site's public
+  // counter currently includes us. Beats arrive with each hub cycle
+  // (~2 min); consider the link stale if none landed for 6 min.
+  let siteLinked = false;
+  let siteOnline = 0;
+  let siteBeatAt = 0;
+  const siteLive = () => siteLinked && Date.now() - siteBeatAt < 360_000;
+  const siteDotHtml = () => {
+    const live = siteLive();
+    const title = live
+      ? `You're counted on the site's online counter${
+          siteOnline > 0 ? ` — ${siteOnline} online now` : ""
+        }. No names, just a number.`
+      : "The site's counter can't see this app right now (hub unreachable). Chat keeps working.";
+    return `<span class="sitelink ${live ? "on" : ""}" title="${title}"><span class="sitedot"></span>${
+      live ? "on the site" : "site: offline"
+    }</span>`;
+  };
+  const updateSiteDot = () => {
+    document.querySelectorAll<HTMLElement>(".sitelink").forEach((el) => {
+      el.outerHTML = siteDotHtml();
+    });
+  };
+  setInterval(updateSiteDot, 30_000);
+
   // Live elapsed counter for the room-search phase: finding the room can
   // legitimately take ~60s (grace period before founding), which reads as
   // a hang without a ticking indicator. Full re-renders would fight the
@@ -243,6 +269,12 @@ async function boot() {
         else connectedPeers.delete(p.peer);
         render();
         break;
+      case "presence":
+        siteLinked = p.linked;
+        siteOnline = p.online;
+        siteBeatAt = Date.now();
+        updateSiteDot();
+        break;
       case "log":
         if (p.message.startsWith("conn ") || p.message.startsWith("hub ")) return;
         console.debug("[node]", p.message);
@@ -329,6 +361,7 @@ async function boot() {
         <span class="logo">OnlyHumans</span>
         ${myName ? `<span class="whoami">· ${escapeHtml(myName)}</span>` : ""}
         ${appVer ? `<span class="ver">· v${escapeHtml(appVer)}</span>` : ""}
+        ${siteDotHtml()}
       </header>
       <main>
         <div class="sidebar">

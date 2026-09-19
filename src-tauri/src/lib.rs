@@ -9,6 +9,27 @@ struct AppState {
     store: Mutex<Store>,
     node: Mutex<Option<NodeHandle>>,
     my_id: String,
+    /// Anonymous site-presence token for THIS process; the core heartbeats
+    /// it and the shell removes it on exit/restart paths.
+    presence_token: std::sync::OnceLock<String>,
+}
+
+/// Remove our presence token from the site's online counter. Blocking by
+/// design: it must complete (or time out) before the process exits, and it
+/// must not depend on the node task, which can be busy mid-dial for up to
+/// its 10s hub timeout. Never takes longer than the 3s client timeout.
+fn leave_presence_blocking(token: &str) {
+    let r = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .and_then(|c| {
+            c.post(format!("{}/api/presence", onlyhumans_core::hub::DEFAULT_HUB))
+                .json(&serde_json::json!({ "token": token, "leave": true }))
+                .send()
+        });
+    if let Err(e) = r {
+        eprintln!("presence leave failed: {e}");
+    }
 }
 
 #[tauri::command]
@@ -50,6 +71,10 @@ fn passcode(app: AppHandle) -> Option<String> {
 fn logoff(app: AppHandle) -> Result<(), String> {
     let dir = resolve_dir(&app).ok_or("no data dir")?;
     std::fs::remove_file(dir.join("username.txt")).map_err(|e| e.to_string())?;
+    // Drop the site-presence token before the process goes away.
+    if let Some(t) = app.try_state::<AppState>().and_then(|s| s.presence_token.get().cloned()) {
+        leave_presence_blocking(&t);
+    }
     app.restart(); // does not return (same semantics as set_passcode)
     Ok(())
 }
@@ -152,6 +177,11 @@ fn has_passcode(app: AppHandle) -> bool {
 fn set_passcode(app: AppHandle, word: Option<String>) -> Result<(), String> {
     let dir = resolve_dir(&app).ok_or("no data dir")?;
     write_passcode(&dir, word.as_deref())?;
+    // The restart mints a fresh presence token; drop the old one first so
+    // the site's counter never double-counts the swap.
+    if let Some(t) = app.try_state::<AppState>().and_then(|s| s.presence_token.get().cloned()) {
+        leave_presence_blocking(&t);
+    }
     app.restart(); // does not return
 }
 
@@ -206,6 +236,12 @@ fn start_node(app_handle: AppHandle, dir: std::path::PathBuf, username: String, 
         if !pa.is_empty() {
             cfg.public_addr = Some(pa);
         }
+    }
+    // One anonymous presence token per process: the core heartbeats it to
+    // the site's counter; remember it here so exit paths can remove it.
+    let presence_token = cfg.presence_token.clone();
+    if let Some(state) = app_handle.try_state::<AppState>() {
+        let _ = state.presence_token.set(presence_token);
     }
     tauri::async_runtime::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -510,6 +546,7 @@ pub fn run() {
                 store: Mutex::new(store),
                 node: Mutex::new(None),
                 my_id: my_id.clone(),
+                presence_token: std::sync::OnceLock::new(),
             });
 
             // The node only starts once a username exists (the UI gates
@@ -520,6 +557,38 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        // Graceful exit: the window X first lets the node shut down and
+        // removes our anonymous presence token (so the site's online
+        // counter forgets us immediately instead of at TTL expiry), then
+        // closes. The leave is a blocking call in its own thread — the
+        // node task may be mid-dial for up to 10s and cannot be relied on
+        // here. restart() bypasses CloseRequested, so the passcode/logoff
+        // restart flows are unaffected (they leave explicitly).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle().clone();
+                let state = app.try_state::<AppState>();
+                let node = state.as_ref().and_then(|s| s.node.lock().unwrap().clone());
+                let token = state.as_ref().and_then(|s| s.presence_token.get().cloned());
+                let Some(token) = token else { return }; // gate screen: nothing beaconed yet
+                api.prevent_close();
+                if let Some(node) = node {
+                    let _ = node.cmd_tx.send(Command::Shutdown);
+                }
+                std::thread::spawn(move || {
+                    leave_presence_blocking(&token);
+                    match app.get_webview_window("main") {
+                        Some(w) => {
+                            if let Err(e) = w.destroy() {
+                                eprintln!("close after shutdown failed: {e}");
+                                std::process::exit(0);
+                            }
+                        }
+                        None => std::process::exit(0),
+                    }
+                });
+            }
         })
         .invoke_handler(tauri::generate_handler![
             my_id,

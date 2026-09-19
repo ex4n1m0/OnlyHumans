@@ -27,6 +27,18 @@ pub struct RoomHostRecord {
     pub sig_b64: String,
 }
 
+#[derive(Debug, Serialize)]
+struct PresencePing<'a> {
+    token: &'a str,
+    leave: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PresenceResp {
+    #[serde(default)]
+    online: u64,
+}
+
 fn room_canonical(room_id: &str, host: &str, pub_b64: &str, ts_ms: u64) -> Vec<u8> {
     let mut v = Vec::new();
     v.extend_from_slice(b"OH1-room|");
@@ -105,6 +117,44 @@ impl HubClient {
         }
         let r: RegResp = resp.json().await.unwrap_or_default();
         Ok(r.observed_ip.or(r.observed_ip_camel).filter(|s| !s.trim().is_empty()))
+    }
+
+    /// Anonymous presence beacon for the site's live counter. The token is
+    /// random per app start — deliberately NOT the peer id — so the hub can
+    /// count running apps but never tie a count to an identity. Returns the
+    /// current online count (including us).
+    pub async fn presence(&self, token: &str) -> anyhow::Result<u64> {
+        let resp = self
+            .http
+            .post(format!("{}/api/presence", self.base))
+            .json(&PresencePing { token, leave: false })
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            // We beat at most every ~120s; a 429 means a beat landed <30s
+            // ago, so the site still counts us.
+            return Ok(0);
+        }
+        if !resp.status().is_success() {
+            anyhow::bail!("presence failed: {} {}", resp.status(), resp.text().await.unwrap_or_default());
+        }
+        let r: PresenceResp = resp.json().await.unwrap_or_default();
+        Ok(r.online)
+    }
+
+    /// Remove our presence token (best-effort graceful exit; the entry
+    /// also expires on its own).
+    pub async fn presence_leave(&self, token: &str) -> anyhow::Result<()> {
+        let resp = self
+            .http
+            .post(format!("{}/api/presence", self.base))
+            .json(&PresencePing { token, leave: true })
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("presence leave failed: {}", resp.status());
+        }
+        Ok(())
     }
 
     /// Look up a peer; returns None if unknown/expired. Signatures are

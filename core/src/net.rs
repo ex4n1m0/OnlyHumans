@@ -162,6 +162,10 @@ pub enum NodeEvent {
     MessagesCleared { room: String },
     Rotated { room: String, new_epoch: u64 },
     ConnectionStateChanged { peer: String, connected: bool },
+    /// Site link: our anonymous presence beacon landed (the site's public
+    /// counter now includes us) or failed. `online` is the count the hub
+    /// reported (0 when unknown/rate-limited — still linked).
+    Presence { linked: bool, online: u64 },
     Log { message: String },
 }
 
@@ -198,6 +202,10 @@ pub struct NodeConfig {
     /// Public address (IP or DNS name) to publish FIRST for port-forwarded
     /// hosts — the one address peers behind other NATs can dial.
     pub public_addr: Option<String>,
+    /// Anonymous site-presence token (random per process start). Owned by
+    /// the SHELL so it can drop the token on exit even if this task is
+    /// busy mid-dial; the shell also passes it here for the heartbeats.
+    pub presence_token: String,
 }
 
 impl Default for NodeConfig {
@@ -215,6 +223,12 @@ impl Default for NodeConfig {
             username: None,
             passcode: None,
             public_addr: None,
+            presence_token: {
+                use rand::RngCore;
+                let mut b = [0u8; 16];
+                rand::thread_rng().fill_bytes(&mut b);
+                hex::encode(b)
+            },
         }
     }
 }
@@ -347,6 +361,10 @@ pub async fn spawn(
     hub_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut hub_registered = false;
     let mut room_tick = tokio::time::interval(Duration::from_secs(5));
+    // Presence beacon token from the config (shell-owned so exit cleanup
+    // can't race this task): random per app start, never derived from the
+    // identity — the site's counter learns "an app", nothing more.
+    let presence_token = cfg.presence_token.clone();
 
     // rusqlite's Connection is !Sync; a std Mutex makes the task Send.
     let store = std::sync::Mutex::new(store);
@@ -355,6 +373,11 @@ pub async fn spawn(
             tokio::select! {
                 Some(cmd) = cmd_rx.recv() => {
                     if matches!(cmd, Command::Shutdown) {
+                        // Drop our presence token so the site's counter
+                        // forgets us immediately instead of at TTL expiry.
+                        if !cfg.offline {
+                            let _ = hub.presence_leave(&presence_token).await;
+                        }
                         break;
                     }
                     if matches!(cmd, Command::ResetRoom) {
@@ -398,6 +421,7 @@ pub async fn spawn(
                             // rate limit; reset pushes the next refresh a
                             // full period out.
                             hub_interval.reset();
+                            beat_presence(&hub, &presence_token, &event_tx).await;
                         }
                         Err(e) => {
                             let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
@@ -408,6 +432,7 @@ pub async fn spawn(
                     if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), &mut observed_ip).await {
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
+                    beat_presence(&hub, &presence_token, &event_tx).await;
                     // Hosts refresh their room record alongside addresses
                     // so the election pointer never silently expires while
                     // they are alive.
@@ -524,6 +549,26 @@ async fn flush_or_redial(
         flush_outbox(swarm, outbox, peer);
     } else {
         dial_peer(swarm, hub, identity, peer, cfg, event_tx).await;
+    }
+}
+
+/// One presence beat: tell the site "a running app exists" and surface the
+/// result as a Presence event for the UI's site-link indicator. Rides the
+/// registration cadence (the beacon is meaningless if we can't reach the
+/// hub at all).
+async fn beat_presence(
+    hub: &HubClient,
+    token: &str,
+    event_tx: &mpsc::UnboundedSender<NodeEvent>,
+) {
+    match hub.presence(token).await {
+        Ok(n) => {
+            let _ = event_tx.send(NodeEvent::Presence { linked: true, online: n });
+        }
+        Err(e) => {
+            let _ = event_tx.send(NodeEvent::Presence { linked: false, online: 0 });
+            let _ = event_tx.send(NodeEvent::Log { message: format!("presence: {e}") });
+        }
     }
 }
 
@@ -1239,4 +1284,18 @@ fn dispatch_room_event(
     }
     let _ = from;
     let _ = (swarm, outbox);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The UI switches on `kind` with camelCase fields (the wire-format
+    /// contract); assert the exact JSON shape every consumer sees.
+    #[test]
+    fn presence_event_serializes_camel_case() {
+        let ev = NodeEvent::Presence { linked: true, online: 3 };
+        let j = serde_json::to_string(&ev).unwrap();
+        assert_eq!(j, r#"{"kind":"presence","linked":true,"online":3}"#);
+    }
 }

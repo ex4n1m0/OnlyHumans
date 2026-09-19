@@ -8,7 +8,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 set -a; source secrets/release-gk.env; set +a
 export OH_GK_A OH_GK_B
 
-EXE=target/release/onlyhumans-app.exe
+EXE=target/release/OnlyHumans.exe
 SETUP=$(ls -t target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
 EXPECT_ROOM=7ce7d037f2428e5377b188489a20bc3c
 
@@ -34,7 +34,7 @@ def load():
 a_hex, b_hex, s_hex, gk_hex, gk = load()
 needles = {"share A": a_hex, "share B": b_hex, "secret S": s_hex, "GK hex": gk_hex}
 setups = glob.glob("target/release/bundle/nsis/*-setup.exe")
-files = {"EXE": "target/release/onlyhumans-app.exe"}
+files = {"EXE": "target/release/OnlyHumans.exe"}
 if setups:
     files["INSTALLER"] = setups[0]
 rc = 0
@@ -49,7 +49,7 @@ for fname, path in files.items():
         else:
             print(f"clean: {fname} — {label} hex string absent")
 
-exe = open("target/release/onlyhumans-app.exe", "rb").read()
+exe = open("target/release/OnlyHumans.exe", "rb").read()
 target_room = "7ce7d037f2428e5377b188489a20bc3c"
 hits = []
 for i in range(len(exe) - 32):
