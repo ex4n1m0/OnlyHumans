@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnlyHumans — encrypted chat between humans, no message servers</title>
 <meta name="description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub and a sealed fallback mailbox.">
+<meta name="theme-color" content="#0e1518">
+<link rel="canonical" href="https://onlyhumans.deepflux.space/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://onlyhumans.deepflux.space/">
+<meta property="og:title" content="OnlyHumans — encrypted chat between humans, no message servers">
+<meta property="og:description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub and a sealed fallback mailbox.">
+<meta property="og:image" content="https://onlyhumans.deepflux.space/icon-256.png">
+<meta name="twitter:card" content="summary">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/icon-256.png">
 <script type="application/ld+json">
@@ -20,11 +28,17 @@
     --ink: #d8e4e8; --muted: #8fa6b0;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--bg); color: var(--ink); }
   a { color: var(--teal); }
   :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+  .skip-link { position: absolute; left: -999px; top: 0; z-index: 100;
+               background: var(--teal-deep); color: #fff; padding: .6rem 1.1rem;
+               border-radius: 0 0 10px 0; font-size: .9rem; text-decoration: none; }
+  .skip-link:focus { left: 0; }
+  main h2[id] { scroll-margin-top: 4.2rem; }
 
   /* ---------- nav ---------- */
   nav {
@@ -39,7 +53,8 @@
   nav .wordmark { font-weight: 700; color: #fff; font-size: 1rem; }
   nav .wordmark b { color: var(--teal); }
   nav .links { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
-  nav .links a { color: var(--muted); text-decoration: none; font-size: .92rem; }
+  nav .links a { color: var(--muted); text-decoration: none; font-size: .92rem;
+                 padding: .35rem 0; }
   nav .links a:hover { color: var(--ink); }
   .live-pill {
     display: inline-flex; align-items: center; gap: .45rem;
@@ -54,7 +69,6 @@
     .live-dot { animation: livedot 2.4s ease-in-out infinite; }
     @keyframes livedot { 0%,100% { opacity:.45 } 50% { opacity:1 } }
   }
-  @media (max-width: 760px) { nav .links { display: none; } }
 
   /* ---------- hero ---------- */
   .hero {
@@ -68,6 +82,7 @@
   }
   .hero-inner { max-width: 1000px; margin: 0 auto; display: flex; gap: 3rem;
                 align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .hero-inner > div:first-child { flex: 1 1 460px; min-width: 0; }
   .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.12;
              color: #fff; margin: 1.1rem 0 1rem; max-width: 22ch; }
   .hero h1 em { font-style: normal; color: var(--teal); }
@@ -168,7 +183,8 @@
   /* faq */
   details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
             padding: .8rem 1.1rem; margin: .5rem 0; }
-  details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem; }
+  details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem;
+                    padding: .35rem 0; }
   details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
 
   /* changelog */
@@ -180,11 +196,30 @@
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.6rem;
            text-align: center; font-size: .85rem; color: var(--muted); line-height: 1.7; }
   .deploy-line { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; }
+
+  /* ---------- responsive & input tweaks (kept last to win the cascade) ---------- */
+  @media (max-width: 760px) {
+    nav { flex-wrap: wrap; row-gap: .45rem; }
+    nav .live-pill { order: 1; margin-left: auto; }
+    nav .links {
+      display: flex; order: 2; width: 100%; margin-left: 0;
+      overflow-x: auto; -webkit-overflow-scrolling: touch;
+      scrollbar-width: none; padding: .15rem .1rem .3rem;
+    }
+    nav .links::-webkit-scrollbar { display: none; }
+    .dl-box { gap: .8rem; }
+    .dl-note { margin-top: .35rem; }
+  }
+  @media (pointer: coarse) {
+    .layer-tabs button { padding: .65rem 1.25rem; }
+    details summary { padding: .5rem 0; }
+  }
 </style>
 </head>
 <body>
 
-<nav>
+<a class="skip-link" href="#see-it-work">Skip to content</a>
+<nav aria-label="Site">
   <div class="brand">
     <img src="/logo.png" alt="OnlyHumans logo" width="26" height="26">
     <span class="wordmark">only<b>humans</b></span>
@@ -333,12 +368,12 @@
 
   <h2 id="how-it-works">How it works</h2>
   <div class="layers">
-    <div class="layer-tabs" role="tablist">
-      <button role="tab" id="tab-find" aria-selected="true">1 · Find</button>
-      <button role="tab" id="tab-talk" aria-selected="false">2 · Talk</button>
-      <button role="tab" id="tab-fallback" aria-selected="false">3 · Fallback</button>
+    <div class="layer-tabs" role="tablist" aria-label="How it works layers">
+      <button role="tab" id="tab-find" aria-selected="true" aria-controls="layer-find">1 · Find</button>
+      <button role="tab" id="tab-talk" aria-selected="false" aria-controls="layer-talk" tabindex="-1">2 · Talk</button>
+      <button role="tab" id="tab-fallback" aria-selected="false" aria-controls="layer-fallback" tabindex="-1">3 · Fallback</button>
     </div>
-    <div class="layer" id="layer-find">
+    <div class="layer" id="layer-find" role="tabpanel" aria-labelledby="tab-find">
       <h3>Finding each other <span class="tag">signed · expiring · unreadable</span></h3>
       <p>Your identity is a keypair generated on your device — no accounts, no
       phone numbers. The only shared service is this site: a signed, expiring
@@ -346,7 +381,7 @@
       hosts each room. Peers verify every record themselves; the hub stores
       bytes it cannot forge and cannot read.</p>
     </div>
-    <div class="layer" id="layer-talk" hidden>
+    <div class="layer" id="layer-talk" hidden role="tabpanel" aria-labelledby="tab-talk">
       <h3>Talking <span class="tag">direct · end-to-end · padded</span></h3>
       <p>When you open the app you prove knowledge of the community key,
       receive the room key sealed for you, and talk straight to everyone in
@@ -354,7 +389,7 @@
       server, frames padded so even their lengths stay quiet. The relay path,
       if your network needs one, carries only ciphertext.</p>
     </div>
-    <div class="layer" id="layer-fallback" hidden>
+    <div class="layer" id="layer-fallback" hidden role="tabpanel" aria-labelledby="tab-fallback">
       <h3>When two people can't connect <span class="tag">sealed · signed · timestamped</span></h3>
       <p>Hard networks happen. When direct delivery fails, sealed envelopes
       wait in a signed hub inbox and drain through this site — within a minute
@@ -400,42 +435,42 @@
   </div>
 
   <h2 id="faq">Questions friends actually ask</h2>
-  <details>
+  <details name="faq">
     <summary>Do I need an account?</summary>
     <p>No. Install, type any name, you're in. Your identity is a key generated
     on your device the first time the app runs.</p>
   </details>
-  <details>
+  <details name="faq">
     <summary>Where do my messages live?</summary>
     <p>On the members' devices, sealed. The main room's history survives
     restarts on your machine; private chats live in memory and vanish when
     both people leave. The website never sees or stores a single word.</p>
   </details>
-  <details>
+  <details name="faq">
     <summary>What happens if this site disappears?</summary>
     <p>The site is only the address book and the fallback mailbox. Without it,
     the app can't introduce NEW peers to each other — but people already
     connected keep talking, and the site has no messages to lose.</p>
   </details>
-  <details>
+  <details name="faq">
     <summary>Who can join the main room?</summary>
     <p>Anyone holding the installer — the community key inside it is the
     ticket. The room host can rotate the key at any moment, which closes the
     room to newcomers forever.</p>
   </details>
-  <details>
+  <details name="faq">
     <summary>What's a code room?</summary>
     <p>Type a word at the door and you're in a parallel room with everyone who
     types the same word. The word is never transmitted — each device derives
     the same room from it. Great for "just us"; pick unguessable words.</p>
   </details>
-  <details>
+  <details name="faq">
     <summary>Someone was offline when I sent a message. Is it lost?</summary>
     <p>No — since 1.0.12 the message waits sealed on the site's fallback
     mailbox and arrives when they're back, usually within a minute or two.
     It's marked <b>⇄ site</b> so the path is visible.</p>
   </details>
-  <details>
+  <details name="faq">
     <summary>Does it work on my phone?</summary>
     <p>Not yet — Windows and Linux today, Android is planned. The desktop UI
     is already designed to adapt.</p>
@@ -496,16 +531,28 @@
     setInterval(tick, 60000);
   })();
 
-  // Layer toggle for "how it works".
+  // Layer toggle for "how it works" — ARIA tabs pattern with roving
+  // tabindex: ArrowLeft/ArrowRight move between tabs and select them.
   (function () {
     var keys = ["find", "talk", "fallback"];
-    keys.forEach(function (k) {
-      document.getElementById("tab-" + k).addEventListener("click", function () {
-        keys.forEach(function (k2) {
-          var on = k2 === k;
-          document.getElementById("tab-" + k2).setAttribute("aria-selected", on ? "true" : "false");
-          document.getElementById("layer-" + k2).hidden = !on;
-        });
+    var tabs = keys.map(function (k) { return document.getElementById("tab-" + k); });
+    function select(i) {
+      keys.forEach(function (k2, j) {
+        var on = j === i;
+        tabs[j].setAttribute("aria-selected", on ? "true" : "false");
+        tabs[j].tabIndex = on ? 0 : -1;
+        document.getElementById("layer-" + k2).hidden = !on;
+      });
+    }
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener("click", function () { select(i); });
+      tab.addEventListener("keydown", function (e) {
+        var d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+        if (!d) return;
+        e.preventDefault();
+        var n = (i + d + tabs.length) % tabs.length;
+        select(n);
+        tabs[n].focus();
       });
     });
   })();
