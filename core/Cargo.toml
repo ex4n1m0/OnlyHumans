@@ -1,6 +1,6 @@
 [package]
 name = "onlyhumans_core"
-version = "1.0.11"
+version = "1.0.12"
 edition = "2024"
 
 [build-dependencies]
