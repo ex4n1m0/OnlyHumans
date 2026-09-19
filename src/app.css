@@ -1,15 +1,35 @@
 :root {
+  /* surfaces */
   --bg: #0e1518;
   --panel: #14202a;
   --panel-2: #0f1a21;
+  --line: #1f3038;
+  /* accents — frozen meanings: teal brand/public · violet private ·
+     green live · amber code/waiting · red destructive */
   --teal: #17a2b8;
   --teal-dim: #0d6e79;
   --violet: #8b5cf6;
   --violet-dim: #251b47;
   --violet-line: #3b2d6b;
+  --green: #22c55e;
+  --amber: #f59e0b;
+  --red: #c0564f;
+  /* text */
   --text: #d8e4e8;
-  --muted: #7d95a0;
+  --muted: #8fa6b0;
   --danger: #c0564f;
+  /* type scale (12px floor) · radius · motion */
+  --fs-xs: 12px; --fs-s: 13px; --fs-m: 14px; --fs-l: 16px;
+  --r-card: 8px; --r-pill: 999px; --r-input: 6px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #app { height: 100%; }
@@ -32,11 +52,43 @@ header {
 header .logo { font-weight: 700; letter-spacing: .04em; color: var(--teal); }
 header .brandlogo { width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0; }
 header .whoami { color: var(--muted); font-size: .85em; }
-header .ver { color: var(--muted); font-size: 11px; }
+header .ver { color: var(--muted); font-size: var(--fs-xs); }
 header .sitelink {
   margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
-  color: var(--muted); font-size: 11px; white-space: nowrap; user-select: none;
+  color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; user-select: none;
 }
+header .roomswitch, header .idmenu {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 1px solid transparent; border-radius: var(--r-card);
+  color: var(--text); font-size: var(--fs-s); padding: 5px 9px; cursor: pointer;
+  transition: background var(--t-ui, 180ms) ease-out;
+}
+header .roomswitch:hover, header .idmenu:hover { background: var(--panel); }
+header .roomswitch .rs-glyph { color: var(--teal); }
+header .roomswitch .rs-label { font-weight: 600; }
+header .idmenu .avatar { width: 20px; height: 20px; font-size: 10px; }
+header .idmenu .idname { color: var(--muted); }
+header .caret { color: var(--muted); font-size: 10px; }
+
+.menu {
+  position: fixed; z-index: 90; min-width: 240px; max-width: 320px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .45); padding: 4px;
+}
+.menu-header {
+  padding: 7px 10px 5px; color: var(--muted); font-size: var(--fs-xs);
+  border-bottom: 1px solid var(--line); margin-bottom: 4px;
+}
+.menu-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  width: 100%; text-align: left; background: transparent; border: 0;
+  color: var(--text); font-size: var(--fs-m); padding: 7px 10px; border-radius: var(--r-input);
+  cursor: pointer;
+}
+.menu-item:hover { background: var(--panel-2); }
+.menu-item .mi-hint { color: var(--muted); font-size: var(--fs-xs); }
+.menu-item.danger { color: #ffb4b0; }
+.menu-item.danger:hover { background: rgba(192, 86, 79, .18); }
 header .sitelink .sitedot {
   width: 8px; height: 8px; border-radius: 50%;
   background: #46565e; flex-shrink: 0;
@@ -47,7 +99,7 @@ header .sitelink.on .sitedot {
   box-shadow: 0 0 6px rgba(34, 197, 94, .8);
 }
 header .myid {
-  flex: 1; font-family: Consolas, monospace; font-size: 11px;
+  flex: 1; font-family: Consolas, monospace; font-size: var(--fs-xs);
   color: var(--muted); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; cursor: pointer;
 }
@@ -67,13 +119,14 @@ main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
   display: flex; align-items: center; gap: 8px; position: relative;
 }
 .sidebar li:hover { background: transparent; }
-.sidebar li .peer { font-family: Consolas, monospace; font-size: 11px; color: var(--muted); }
+.sidebar li .peer { font-family: Consolas, monospace; font-size: var(--fs-xs); color: var(--muted); }
 .roominfo { padding: 10px 12px; border-bottom: 1px solid #1f3038; }
+.sidebar .status { color: var(--muted); font-size: var(--fs-xs); padding: 10px 14px 6px; }
 .roominfo .status { color: var(--muted); font-size: 12px; }
 .side-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
                color: var(--muted); padding: 14px 14px 4px; font-weight: 600; }
 .side-label.plabel { color: var(--violet); }
-.side-hint { color: var(--muted); font-size: 11px; padding: 4px 14px 8px; font-style: italic; }
+.side-hint { color: var(--muted); font-size: var(--fs-xs); padding: 4px 14px 8px; font-style: italic; }
 
 /* main-room card — visually distinct from everything else */
 .roomcard { display: flex; align-items: center; gap: 10px; margin: 4px 8px 8px;
@@ -84,7 +137,7 @@ main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 .roomcard.active { border-color: var(--teal); box-shadow: 0 0 0 1px var(--teal-dim), 0 4px 14px rgba(23,162,184,.15); }
 .roomcard .rc-body { flex: 1; min-width: 0; }
 .roomcard .rc-name { font-weight: 700; color: #eafcff; font-size: 13px; }
-.roomcard .rc-sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.roomcard .rc-sub { color: var(--muted); font-size: var(--fs-xs); margin-top: 2px; }
 
 /* avatars */
 .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
@@ -107,7 +160,7 @@ main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 .sidebar .member-list { flex: 1; min-height: 0; overflow-y: auto; }
 .sidebar .dm-list { flex-shrink: 0; }
 .sidebar li .mname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rename-btn { background: none; border: none; color: var(--muted); font-size: 11px; padding: 2px 4px; flex-shrink: 0; }
+.rename-btn { background: none; border: none; color: var(--muted); font-size: var(--fs-xs); padding: 2px 4px; flex-shrink: 0; }
 .rename-btn:hover { color: var(--teal); }
 .sidebar li .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
 .sidebar li .dot.on { background: #2ecc71; }
@@ -120,7 +173,20 @@ main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
 }
 .tb-body { flex: 1; min-width: 0; }
 .tb-title { font-weight: 700; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px; }
-.tb-sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.tb-sub { color: var(--muted); font-size: var(--fs-xs); margin-top: 2px; }
+.pills { display: flex; gap: 6px; margin-top: 4px; }
+.pill {
+  font-size: var(--fs-xs); color: var(--muted); border: 1px solid var(--line);
+  border-radius: var(--r-pill); padding: 1px 9px; white-space: nowrap;
+}
+.pill.amber { color: var(--amber); border-color: rgba(245, 158, 11, .4); }
+.pill.lock { color: var(--teal); border-color: var(--teal-dim); cursor: help; }
+.more-btn {
+  flex-shrink: 0; width: 32px; height: 32px; border-radius: var(--r-input);
+  border: 1px solid var(--line); background: transparent; color: var(--muted);
+  cursor: pointer; font-size: 15px;
+}
+.more-btn:hover { color: var(--text); border-color: var(--teal-dim); }
 .tb-actions { display: flex; gap: 6px; flex-shrink: 0; }
 .pub-pill { display: inline-block; background: var(--teal-dim); color: #eafcff; font-size: 9px;
             font-weight: 700; letter-spacing: .12em; padding: 2px 8px; border-radius: 999px;
@@ -150,7 +216,7 @@ main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
   border-radius: 6px; padding: 4px 8px; font-size: 12px; width: 160px;
 }
 .messages { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px; }
-.sender { font-size: 11px; font-weight: 600; margin: 6px 0 -3px 4px; align-self: flex-start; }
+.sender { font-size: var(--fs-xs); font-weight: 600; margin: 6px 0 -3px 4px; align-self: flex-start; }
 .msg.out + .sender, .msg.in + .sender { margin-top: 8px; }
 .msg { max-width: 70%; padding: 7px 11px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
 .msg.out { align-self: flex-end; background: var(--teal-dim); color: #eafcff; }
@@ -189,7 +255,7 @@ button.danger { background: transparent; border-color: var(--danger); color: var
 .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
          gap: .5rem; color: var(--muted); text-align: center; padding: 1rem; }
 .roominfo .roomactions { display: flex; gap: 6px; margin-top: 8px; }
-.roominfo .roomactions button { flex: 1; font-size: 11px; padding: 5px 8px; }
+.roominfo .roomactions button { flex: 1; font-size: var(--fs-xs); padding: 5px 8px; }
 .join-progress { display: flex; align-items: center; justify-content: center; gap: .5rem;
                  margin-bottom: .6rem; color: var(--teal); }
 .spin { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--teal-dim);

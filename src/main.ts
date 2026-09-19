@@ -187,9 +187,16 @@ async function boot() {
 
   document.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Escape") {
+      closeMenus();
       if (rotateModalOpen) closeRotateModal();
       if (resetModalOpen) closeResetModal();
     }
+  });
+  // Dismiss any open menu on an outside click (menu items stop
+  // propagation, so this only fires for clicks elsewhere).
+  document.addEventListener("click", (e) => {
+    const m = document.getElementById("open-menu");
+    if (m && !m.contains(e.target as Node)) closeMenus();
   });
 
   render();
@@ -375,14 +382,50 @@ async function boot() {
     render();
   }
 
-  function toast(text: string) {
-    const box = ensureToasts();
-    const t = document.createElement("div");
-    t.className = "toast";
-    t.textContent = text;
-    box.appendChild(t);
-    setTimeout(() => t.remove(), 6000);
+function toast(text: string) {
+  const box = ensureToasts();
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = text;
+  box.appendChild(t);
+  setTimeout(() => t.remove(), 6000);
+}
+
+type MenuItem = { label: string; hint?: string; danger?: boolean; header?: boolean; act?: () => void };
+
+/** Dropdown menu anchored to a command-bar / titlebar control. One menu
+ * at a time (id="open-menu"); dismissed by outside click or Escape. */
+function openMenu(anchor: HTMLElement, items: MenuItem[]) {
+  closeMenus();
+  const m = document.createElement("div");
+  m.className = "menu";
+  m.id = "open-menu";
+  for (const it of items) {
+    if (it.header) {
+      const h = document.createElement("div");
+      h.className = "menu-header";
+      h.textContent = it.label;
+      m.appendChild(h);
+      continue;
+    }
+    const b = document.createElement("button");
+    b.className = "menu-item" + (it.danger ? " danger" : "");
+    b.innerHTML = `<span class="mi-label">${it.label}</span>${it.hint ? `<span class="mi-hint">${it.hint}</span>` : ""}`;
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeMenus();
+      it.act?.();
+    });
+    m.appendChild(b);
   }
+  document.body.appendChild(m);
+  const r = anchor.getBoundingClientRect();
+  m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - m.offsetWidth - 8)) + "px";
+  m.style.top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - m.offsetHeight - 8)) + "px";
+}
+function closeMenus() {
+  document.getElementById("open-menu")?.remove();
+}
 
   function ensureToasts(): HTMLElement {
     let box = document.querySelector<HTMLElement>(".toasts");
@@ -403,45 +446,24 @@ async function boot() {
       ? { value: prevRename.value, focused: document.activeElement === prevRename }
       : null;
     layout.innerHTML = `
-      <header>
+      <header class="cmdbar">
         <img class="brandlogo" src="/logo.png" alt="">
         <span class="logo">OnlyHumans</span>
-        ${myName ? `<span class="whoami">· ${escapeHtml(myName)}</span>` : ""}
-        ${appVer ? `<span class="ver">· v${escapeHtml(appVer)}</span>` : ""}
+        <button id="room-switch" class="roomswitch" title="rooms — switch, move, or open another window">
+          <span class="rs-glyph">${codeRoom ? "◆" : "⌂"}</span>
+          <span class="rs-label">${codeRoom ? "Code room" : "Main room"}</span>
+          <span class="caret">▾</span>
+        </button>
         ${siteDotHtml()}
+        <button id="identity-menu" class="idmenu" title="your profile">
+          ${avatarHtml(myId, myName || "you")}
+          <span class="idname">${escapeHtml(myName || "you")}</span>
+          <span class="caret">▾</span>
+        </button>
       </header>
       <main>
         <div class="sidebar">
-          <div class="roominfo">
-            <div class="status live-status">${statusLine()}</div>
-            <div class="roomactions">
-              <button id="new-room" title="open a second window with its own name and code word — this room stays open">+ new room</button>
-              <button id="logoff" title="forget this name — back to the name/code gate of this room">log off</button>
-            </div>
-          </div>
-          <div class="side-label">the room</div>
-          ${ready ? `
-          <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}">
-            ${MAIN_ROOM_ICON}
-            <div class="rc-body">
-              <div class="rc-name">${codeRoom ? "Code Room" : "Main Room"}</div>
-              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · ${codeRoom ? "same code" : "everyone"}</div>
-            </div>
-            <button class="rename-btn" id="room-code" title="room code">✎ code</button>
-          </div>` : ""}
-          <div class="side-label plabel">private chats</div>
-          ${dms.size ? `<ul class="dm-list">
-            ${[...dms.entries()].map(([hex, dm]) => {
-              const name = displayName(dm.peer);
-              return `
-              <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${dm.peer}">
-                ${avatarHtml(dm.peer, name)}
-                <div class="li-body">
-                  <span class="mname">${escapeHtml(name)}</span>
-                  <span class="li-sub">${connectedPeers.has(dm.peer) ? "online" : "offline"}</span>
-                </div>
-              </li>`;}).join("")}
-          </ul>` : `<div class="side-hint">Click someone below to start a private chat.</div>`}
+          <div class="status live-status">${statusLine()}</div>
           <div class="side-label">people in the room</div>
           <ul class="member-list">
             ${ready ? `
@@ -453,15 +475,30 @@ async function boot() {
               </div>
             </li>` : ""}
             ${members.filter((m) => m.peer !== myId).map((m) => `
-              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}" title="click for a private chat">
+              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}">
                 ${avatarHtml(m.peer, memberLabel(m))}
                 <div class="li-body">
                   <span class="mname">${escapeHtml(memberLabel(m))}</span>
                   <span class="li-sub">${m.peer === hostPeer ? "hosts the room" : (connectedPeers.has(m.peer) ? "online" : "offline")}</span>
                 </div>
+                <button class="dm-btn" data-peer="${m.peer}" title="private chat with ${escapeHtml(memberLabel(m))}">⇄</button>
                 <button class="rename-btn" data-peer="${m.peer}" title="rename">✎</button>
               </li>`).join("")}
           </ul>
+          ${dms.size ? `
+          <div class="side-label plabel">private chats</div>
+          <ul class="dm-list">
+            ${[...dms.entries()].map(([hex, dm]) => {
+              const name = displayName(dm.peer);
+              return `
+              <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${dm.peer}">
+                ${avatarHtml(dm.peer, name)}
+                <div class="li-body">
+                  <span class="mname">${escapeHtml(name)}</span>
+                  <span class="li-sub">${connectedPeers.has(dm.peer) ? "online" : "offline"}</span>
+                </div>
+              </li>`;}).join("")}
+          </ul>` : ""}
         </div>
         ${ready ? `
         <div class="chat ${activeRoom === room ? "" : "dm"}">
@@ -469,16 +506,14 @@ async function boot() {
             ${activeRoom === room
               ? `${MAIN_ROOM_ICON}
                  <div class="tb-body">
-                   <div class="tb-title">${codeRoom ? "Code Room" : "Main Room"} <span class="pub-pill ${codeRoom ? "code" : ""}">${codeRoom ? "code-gated" : "public"}</span></div>
-                   <div class="tb-sub">${statusLine()} · key epoch ${epoch}</div>
+                   <div class="tb-title">${codeRoom ? "Code room" : "Main room"}</div>
+                   <div class="tb-sub">${statusLine()} · generation ${epoch}</div>
+                   <div class="pills">
+                     <span class="pill ${codeRoom ? "amber" : ""}" title="${codeRoom ? "only people who typed this room's code word can be here" : "everyone who opens the app lands here"}">${codeRoom ? "code room" : "public"}</span>
+                     <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
+                   </div>
                  </div>
-                <div class="tb-actions">
-                  ${isHost ? '<button id="rotate" title="new key — closes the room to newcomers forever">Rotate key</button>' : ""}
-                  <button id="reset-room" title="forget this window's room key and rediscover the room">Reset room</button>
-                   <button id="clear-hist" class="${clearArmed ? "danger" : ""}">
-                     ${clearArmed ? "Really clear?" : "Clear history"}
-                   </button>
-                 </div>`
+                 <button id="room-actions" class="more-btn" title="room actions">⋯</button>`
               : (() => {
                   const dm = dms.get(activeRoom ?? "");
                   const peer = dm?.peer ?? "";
@@ -561,24 +596,83 @@ async function boot() {
       if (renameState.focused) renameEl.focus();
     }
 
-    // Room switcher: the pinned main-room row.
-    document.querySelector<HTMLElement>(".sidebar .roomcard")?.addEventListener("click", async (e) => {
-      if ((e.target as HTMLElement).id === "room-code") return;
-      if (!room) return;
-      activeRoom = room;
-      await refreshMessages();
-      render();
+    // ── Command bar menus ─────────────────────────────────────────
+    // Rooms: one home for every room-moving flow (open a parallel
+    // window, or move THIS window by restarting it under another code).
+    document.getElementById("room-switch")?.addEventListener("click", (e) => {
+      const el = e.currentTarget as HTMLElement;
+      if (document.getElementById("open-menu")) { closeMenus(); return; }
+      openMenu(el, [
+        { label: codeRoom ? "◆ this window · code room" : "⌂ this window · main room", header: true },
+        {
+          label: "Open another room window",
+          hint: "side by side — its own name and code",
+          act: () => void invoke("open_parallel_room").catch((err) => toast(String(err))),
+        },
+        {
+          label: "Move this window to another room…",
+          hint: "type a code word — restarts here (empty = main)",
+          act: () => {
+            if (editingCode) { document.getElementById("code-edit-input")?.focus(); return; }
+            editingCode = true;
+            render();
+          },
+        },
+      ]);
     });
-    // Room code: change/clear the code word for this profile. Rooms can't
-    // be swapped mid-session, so saving restarts the app.
-    document.getElementById("room-code")?.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (editingCode) {
-        document.getElementById("code-edit-input")?.focus();
-        return;
-      }
-      editingCode = true;
-      render();
+    // Identity: the person-scoped actions live with the person.
+    document.getElementById("identity-menu")?.addEventListener("click", (e) => {
+      const el = e.currentTarget as HTMLElement;
+      if (document.getElementById("open-menu")) { closeMenus(); return; }
+      openMenu(el, [
+        { label: `${myName || "you"} · v${appVer}`, header: true },
+        {
+          label: "Log off",
+          hint: "forget this name — back to the gate",
+          act: () => void invoke("logoff").catch((err) => toast(String(err))),
+        },
+        { label: "Enter sends · Shift+Enter newline · Esc closes", header: true },
+      ]);
+    });
+    // Room actions: destructive/technical tools behind one overflow.
+    document.getElementById("room-actions")?.addEventListener("click", (e) => {
+      const el = e.currentTarget as HTMLElement;
+      if (document.getElementById("open-menu")) { closeMenus(); return; }
+      const showRoomMenu = () => {
+        openMenu(el, [
+          ...(isHost ? [{
+            label: "Rotate key…",
+            hint: "new key — closes the room to newcomers forever",
+            act: () => { rotateModalOpen = true; render(); },
+          }] : []),
+          {
+            label: clearArmed ? "Really clear for everyone?" : "Clear history",
+            hint: "wipes saved history on every member's device",
+            danger: clearArmed,
+            act: () => {
+              if (!clearArmed) {
+                clearArmed = true;
+                window.clearTimeout(clearTimer);
+                clearTimer = window.setTimeout(() => { clearArmed = false; render(); }, 8000);
+                showRoomMenu();
+                return;
+              }
+              window.clearTimeout(clearTimer);
+              clearArmed = false;
+              void invoke("clear_history").then(() => {
+                toast("History cleared for everyone in the room");
+                render();
+              }).catch((err) => toast(String(err)));
+            },
+          },
+          {
+            label: "Reset room…",
+            hint: "forget this window's key and rediscover",
+            act: () => { resetModalOpen = true; render(); },
+          },
+        ]);
+      };
+      showRoomMenu();
     });
     // The editor lives in the toast layer, which render() never clears —
     // append it only once per open, or every re-render (connection and
@@ -587,7 +681,7 @@ async function boot() {
       const box = ensureToasts();
       const t = document.createElement("div");
       t.className = "toast";
-      t.innerHTML = `<b>Change this window's room</b><div class="code-note">Type a word and Save — this window restarts inside that word's room (everyone using the same word meets there). Empty returns you to the main room. To keep this room open and open another one beside it, use “+ new room” instead.</div>`;
+      t.innerHTML = `<b>Change this window's room</b><div class="code-note">Type a word and Save — this window restarts inside that word's room (everyone using the same word meets there). Empty returns you to the main room. To keep this room open and open another one beside it, use “Open another room window” instead.</div>`;
       const row = document.createElement("div");
       row.className = "actions";
       const input = document.createElement("input");
@@ -630,12 +724,12 @@ async function boot() {
         }
       });
     });
-    // Member rows: click opens (or re-opens) a private room; the pencil
-    // renames instead.
-    document.querySelectorAll<HTMLElement>(".sidebar li[data-peer]").forEach((li) => {
-      li.addEventListener("click", (e) => {
-        const peer = li.dataset.peer!;
-        if ((e.target as HTMLElement).classList.contains("rename-btn")) return;
+    // Member rows: the ⇄ chip opens (or re-opens) the private chat; the
+    // pencil renames. Row clicks don't start conversations by accident.
+    document.querySelectorAll<HTMLElement>(".sidebar button.dm-btn").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const peer = (b as HTMLElement).dataset.peer!;
         void invoke("open_dm", { peer }).catch((err) => toast(String(err)));
       });
     });
@@ -692,10 +786,6 @@ async function boot() {
     document.getElementById("send-text")?.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") sendCurrent();
     });
-    document.getElementById("rotate")?.addEventListener("click", () => {
-      rotateModalOpen = true;
-      render();
-    });
     document.getElementById("rotate-cancel")?.addEventListener("click", closeRotateModal);
     document.getElementById("rotate-backdrop")?.addEventListener("click", (e) => {
       if (e.target === e.currentTarget) closeRotateModal();
@@ -707,10 +797,6 @@ async function boot() {
       render();
     });
 
-    document.getElementById("reset-room")?.addEventListener("click", () => {
-      resetModalOpen = true;
-      render();
-    });
     document.getElementById("reset-cancel")?.addEventListener("click", closeResetModal);
     document.getElementById("reset-backdrop")?.addEventListener("click", (e) => {
       if (e.target === e.currentTarget) closeResetModal();
@@ -728,32 +814,6 @@ async function boot() {
       messages = [];
       status = "connecting";
       await invoke("reset_room").catch((e) => toast(String(e)));
-      render();
-    });
-
-    document.getElementById("new-room")?.addEventListener("click", () => {
-      void invoke("open_parallel_room").catch((e) => toast(String(e)));
-    });
-
-    document.getElementById("logoff")?.addEventListener("click", () => {
-      void invoke("logoff").catch((e) => toast(String(e)));
-    });
-
-    document.getElementById("clear-hist")?.addEventListener("click", async () => {
-      if (!clearArmed) {
-        // Destructive global action: require a second click within 8s.
-        clearArmed = true;
-        render();
-        clearTimer = window.setTimeout(() => {
-          clearArmed = false;
-          render();
-        }, 8000);
-        return;
-      }
-      window.clearTimeout(clearTimer);
-      clearArmed = false;
-      await invoke("clear_history");
-      toast("History cleared for everyone in the room");
       render();
     });
 
