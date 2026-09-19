@@ -7,7 +7,10 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 async fn next_event(rx: &mut mpsc::UnboundedReceiver<NodeEvent>, want: &str) -> NodeEvent {
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    // Generous deadline: on slow shared CI runners the restarted guest's
+    // reconnect (re-observe + re-dial past QUIC idle) can outlive 30s
+    // while being perfectly healthy — this flaked CI more than once.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
     loop {
         let ev = tokio::time::timeout_at(deadline, rx.recv())
             .await
