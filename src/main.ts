@@ -211,11 +211,15 @@ async function boot() {
   // legitimately take ~60s (grace period before founding), which reads as
   // a hang without a ticking indicator. Full re-renders would fight the
   // incoming node events, so only the status text nodes are touched.
+  // Calm first: the elapsed seconds appear only after 20s, once the wait
+  // has outlived its promise — before that, counting up is just anxiety.
   const joinStart = Date.now();
   const joinTicker = setInterval(() => {
     if (room !== null) { clearInterval(joinTicker); return; }
+    const elapsed = Math.floor((Date.now() - joinStart) / 1000);
+    const suffix = elapsed >= 20 ? ` · ${elapsed}s` : "";
     document.querySelectorAll<HTMLElement>(".live-status")
-      .forEach((el) => (el.textContent = statusLine()));
+      .forEach((el) => (el.textContent = statusLine() + suffix));
   }, 1000);
 
   document.addEventListener("keydown", (e) => {

@@ -692,7 +692,8 @@ pub fn run() {
             reset_room,
             clear_history,
             request_state,
-            add_contact
+            add_contact,
+            room_snapshot
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
