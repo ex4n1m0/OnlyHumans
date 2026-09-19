@@ -93,10 +93,10 @@
   }
   .hero-inner { width: 100%; max-width: min(1600px, 92vw); margin: 0 auto;
                 display: flex; flex-direction: column; align-items: center;
-                text-align: center; position: relative; }
+                text-align: center; }
   .hero-copy { display: flex; flex-direction: column; align-items: center;
                position: relative; z-index: 1; }
-  .hero-logo { width: clamp(200px, 13vw, 460px); height: auto; aspect-ratio: 1;
+  .hero-logo { width: min(88vw, clamp(600px, 39vw, 1380px)); height: auto; aspect-ratio: 1;
                border-radius: 23%;
                box-shadow: 0 24px 96px rgba(23,162,184,.32); }
   .hero h1 { font-size: clamp(2rem, 1.2rem + 2vw, 4.45rem); line-height: 1.1;
@@ -128,15 +128,13 @@
   .dl-note { font-size: .85rem; color: var(--muted); max-width: 52ch; line-height: 1.6;
              margin-top: .3rem; }
 
-  /* The mesh lives behind the centered content as a wide, quiet backdrop —
+  /* The mesh spans the whole hero behind the content at half opacity —
      the logo is the hero, the network is the atmosphere. */
-  .mesh { position: absolute; left: 50%; top: 50%;
-          transform: translate(-50%, -50%);
-          flex: 0 0 auto; width: clamp(480px, 62vw, 1600px); opacity: .3; }
+  .mesh { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5; }
   .mesh .node { fill: var(--teal); }
   .mesh .hub  { fill: #33505c; }
-  .mesh .edge { stroke: #2a4a56; stroke-width: 1.5; }
-  .mesh .edge.hot { stroke: var(--teal); }
+  .mesh .edge { stroke: #24404b; stroke-width: 1.5; }
+  .mesh .edge.hot { stroke: rgba(23,162,184,.72); }
   @media (prefers-reduced-motion: no-preference) {
     .mesh .pulse { animation: pulse 3.2s ease-in-out infinite; transform-origin: center; }
     .mesh .pulse:nth-child(2) { animation-delay: 1.1s; }
@@ -164,24 +162,6 @@
   .proof .n { font-size: clamp(2rem, 1.2rem + 1vw, 3.1rem); font-weight: 700; color: var(--teal); }
   .proof .t { color: #fff; font-weight: 600; margin: .2rem 0 .3rem; }
   .proof .d { color: var(--muted); font-size: .9rem; line-height: 1.5; }
-
-  /* gallery as a 3-step story */
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr));
-           gap: 1.25rem; margin: .5rem 0 1rem; }
-  .shot { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-          overflow: hidden; }
-  .shot a { display: block; border-bottom: 1px solid var(--line); overflow: hidden; }
-  .shot img { display: block; width: 100%; height: auto; transition: transform .25s ease; }
-  .shot a:hover img { transform: scale(1.025); }
-  .shot figcaption { padding: .8rem 1rem .9rem; font-size: .85rem;
-                     color: var(--muted); line-height: 1.55; }
-  .shot figcaption b { color: var(--ink); }
-  .stepnum { display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
-             background: var(--teal-dim); color: var(--teal); font-weight: 700;
-             align-items: center; justify-content: center; font-size: .8rem;
-             margin-right: .4rem; }
-  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
-          gap: 1.25rem; }
 
   /* how it works: layer toggle */
   .layers { margin-top: .6rem; }
@@ -234,12 +214,6 @@
                     padding: .35rem 0; }
   details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
 
-  /* changelog */
-  .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; max-width: min(980px, 100%); }
-  .cl div { margin: .55rem 0; }
-  .cl b { color: var(--teal); font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
-  .cl span { color: #a9bcc4; font-size: .92rem; }
-
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.6rem;
            text-align: center; font-size: .85rem; color: var(--muted); line-height: 1.7; }
   .deploy-line { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; }
@@ -265,18 +239,16 @@
 </head>
 <body>
 
-<a class="skip-link" href="#see-it-work">Skip to content</a>
+<a class="skip-link" href="#how-it-works">Skip to content</a>
 <nav aria-label="Site">
   <div class="brand">
     <img src="/logo.png" alt="OnlyHumans logo" width="26" height="26">
     <span class="wordmark">only<b>humans</b></span>
   </div>
   <div class="links">
-    <a href="#see-it-work">See it work</a>
     <a href="#how-it-works">How it works</a>
     <a href="#security">Security</a>
     <a href="#faq">FAQ</a>
-    <a href="#changelog">Changelog</a>
   </div>
   <span class="live-pill" id="live-pill" hidden title="Running apps heartbeat an anonymous one-session token — no names, no peer ids.">
     <span class="live-dot" aria-hidden="true"></span>
@@ -323,27 +295,27 @@
         <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code> if no window appears).</span>
       </div>
     </div>
-
-    <svg class="mesh" viewBox="0 0 360 320" aria-hidden="true">
-      <g class="pulse">
-        <path class="edge hot" d="M110 90 L250 70 M110 90 L180 220 M250 70 L180 220 M250 70 L320 170 M180 220 L320 170 M110 90 L40 190 M180 220 L40 190"/>
-        <circle class="node" cx="110" cy="90" r="14"/>
-        <circle class="node" cx="250" cy="70" r="14"/>
-        <circle class="node" cx="180" cy="220" r="14"/>
-        <circle class="node" cx="320" cy="170" r="9"/>
-        <circle class="node" cx="40" cy="190" r="9"/>
-        <circle class="hub" cx="330" cy="300" r="6"/>
-        <path class="edge" d="M320 170 L330 300" stroke-dasharray="4 4"/>
-        <text x="298" y="288" fill="#8fa6b0" font-size="11" font-family="monospace">hub</text>
-      </g>
-      <g class="pulse">
-        <circle class="node" cx="110" cy="90" r="20" fill="none" stroke="#17a2b8" opacity=".5"/>
-      </g>
-      <g class="pulse">
-        <circle class="node" cx="180" cy="220" r="20" fill="none" stroke="#17a2b8" opacity=".5"/>
-      </g>
-    </svg>
   </div>
+
+  <svg class="mesh" viewBox="0 0 1440 810" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+    <g class="pulse">
+      <path class="edge hot" d="M300 260 L760 170 M300 260 L560 590 M760 170 L560 590 M760 170 L1140 380 M560 590 L1140 380 M300 260 L170 560 M560 590 L170 560"/>
+      <circle class="node" cx="300" cy="260" r="40"/>
+      <circle class="node" cx="760" cy="170" r="40"/>
+      <circle class="node" cx="560" cy="590" r="40"/>
+      <circle class="node" cx="1140" cy="380" r="26"/>
+      <circle class="node" cx="170" cy="560" r="26"/>
+      <circle class="hub" cx="1300" cy="700" r="16"/>
+      <path class="edge" d="M1140 380 L1300 700" stroke-dasharray="10 10"/>
+      <text x="1244" y="676" fill="#8fa6b0" font-size="20" font-family="monospace">hub</text>
+    </g>
+    <g class="pulse">
+      <circle class="node" cx="300" cy="260" r="62" fill="none" stroke="#17a2b8" opacity=".5"/>
+    </g>
+    <g class="pulse">
+      <circle class="node" cx="560" cy="590" r="62" fill="none" stroke="#17a2b8" opacity=".5"/>
+    </g>
+  </svg>
 </div>
 
 <main>
@@ -368,52 +340,6 @@
       <div class="d">A community key embedded in the installer decides who can
       enter. Rotate the room key and the door closes behind you, forever.</div>
     </div>
-  </div>
-
-  <h2 id="see-it-work">See it work</h2>
-  <div class="steps">
-    <figure class="shot">
-      <a href="/screenshots/welcome-gate.png" target="_blank" rel="noopener">
-        <img src="/screenshots/welcome-gate.png" alt="First run: a name field and an optional room code field" width="776" height="679" loading="lazy">
-      </a>
-      <figcaption><span class="stepnum">1</span><b>First run.</b> Pick a name —
-      and, optionally, a room code. Leave it empty to land in the room everyone
-      shares; type a word and you'll meet exactly the people who typed the same
-      word.</figcaption>
-    </figure>
-    <figure class="shot">
-      <a href="/screenshots/code-room-host.png" target="_blank" rel="noopener">
-        <img src="/screenshots/code-room-host.png" alt="A code room from the first member: people list, command bar, e2e pills" width="776" height="679" loading="lazy">
-      </a>
-      <figcaption><span class="stepnum">2</span><b>The first one in hosts.</b>
-      The room switcher, the people list, and the quiet trust signals —
-      public/code, end-to-end sealed, room generation.</figcaption>
-    </figure>
-    <figure class="shot">
-      <a href="/screenshots/code-room-guest.png" target="_blank" rel="noopener">
-        <img src="/screenshots/code-room-guest.png" alt="The same room from a second machine that typed the same code word" width="776" height="679" loading="lazy">
-      </a>
-      <figcaption><span class="stepnum">3</span><b>Same word, same room.</b>
-      The second machine typed the code with different capitalization — the
-      word folds to one form, so everyone lands together without ever
-      exchanging it.</figcaption>
-    </figure>
-  </div>
-  <div class="pair">
-    <figure class="shot">
-      <a href="/screenshots/main-room-host.png" target="_blank" rel="noopener">
-        <img src="/screenshots/main-room-host.png" alt="The main room from the host's window" width="776" height="679" loading="lazy">
-      </a>
-      <figcaption><b>The main room, hosted.</b> Everyone who opens the app
-      lands here; the host holds the rotate and clear controls.</figcaption>
-    </figure>
-    <figure class="shot">
-      <a href="/screenshots/main-room-guest.png" target="_blank" rel="noopener">
-        <img src="/screenshots/main-room-guest.png" alt="The main room from a joining member's window" width="776" height="679" loading="lazy">
-      </a>
-      <figcaption><b>…and joined.</b> Same room from a second machine — names
-      on messages, private chats one click away from the people list.</figcaption>
-    </figure>
   </div>
 
   <h2 id="how-it-works">How it works</h2>
@@ -535,20 +461,6 @@
     <p>Not yet — Windows and Linux today, Android is planned. The desktop UI
     is already designed to adapt.</p>
   </details>
-  </div>
-
-  <h2 id="changelog">Changelog</h2>
-  <div class="cl">
-    <div><b>1.0.15</b> <span>— rooms get a visible home: + New room and Switch buttons, one-click invite, real modals, multiline composer; join self-healing fixed; light-blue logo</span></div>
-    <div><b>1.0.14</b> <span>— trust made visible: ⇄ site delivery markers, room narration ("mira joined"), humanized waiting states, one-click invites</span></div>
-    <div><b>1.0.13</b> <span>— new interface: command bar with room switcher, people-first sidebar, e2e + generation pills</span></div>
-    <div><b>1.0.12</b> <span>— the site mailbox: offline delivery through sealed, signed hub envelopes</span></div>
-    <div><b>1.0.11</b> <span>— self-healing room state; join freeze fixed at the UI layer</span></div>
-    <div><b>1.0.10</b> <span>— presence: anonymous online counter on the site, green link dot in the app</span></div>
-    <div><b>1.0.9</b> <span>— cross-NAT connectivity: observed-address hints, fixed-port port-forward mode</span></div>
-    <div><b>1.0.8</b> <span>— split-brain room healing + reset room control</span></div>
-    <div><b>1.0.6</b> <span>— key rotation now seals the room to newcomers, forever</span></div>
-    <div><b>1.0.0</b> <span>— first production release, Windows + Linux in one room</span></div>
   </div>
 
   <h2>Contact &amp; source</h2>
