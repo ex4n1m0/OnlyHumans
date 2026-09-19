@@ -40,6 +40,17 @@
   .hero h1 em { font-style: normal; color: var(--teal); }
   .hero p.lead { font-size: 1.12rem; line-height: 1.6; color: #a9bcc4; max-width: 46ch; }
 
+  .live-badge { margin-top: 1.6rem; display: inline-flex; align-items: center; gap: .6rem;
+                background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+                padding: .45rem 1rem; font-size: .92rem; color: var(--ink); }
+  .live-badge[hidden] { display: none; }
+  .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e;
+              box-shadow: 0 0 8px rgba(34,197,94,.7); flex: 0 0 auto; }
+  @media (prefers-reduced-motion: no-preference) {
+    .live-dot { animation: livedot 2.4s ease-in-out infinite; }
+    @keyframes livedot { 0%,100% { opacity:.45 } 50% { opacity:1 } }
+  }
+
   .dl-box { margin-top: 2rem; display: flex; flex-direction: column; gap: .55rem; }
   a.dl {
     display: inline-flex; align-items: center; gap: .7rem; width: fit-content;
@@ -115,6 +126,12 @@
       <p class="lead">One room. Everyone who opens the app is in it. Messages
       travel straight between devices, sealed end-to-end — this site only ever
       holds signed, expiring IP addresses so peers can find each other.</p>
+
+      <div class="live-badge" id="live-badge" hidden
+           title="Each running app beacons an anonymous one-session token every two minutes — no names, no peer ids. The count fades within a few minutes of apps closing.">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span><b id="live-count">0</b> <span id="live-word">humans</span> online right now</span>
+      </div>
 
       <div class="dl-box">
         <a class="dl" id="dl-btn" href="/download/OnlyHumans-Setup-1.0.1.exe" download>
@@ -247,12 +264,17 @@
     prove knowledge of the community key, receive the room key sealed for
     you, and talk directly to everyone in the room — the relay path, if your
     network needs one, carries only ciphertext.</p>
+    <p style="margin-top:.7rem">The live counter at the top works the same
+    way: each running app beacons a random one-session token every two
+    minutes, expiring after five. The hub can count tokens — it can never
+    tie one to a name, a peer, or a room, and it stores nothing else. The
+    app shows the same link as a green dot in its header.</p>
   </div>
 
   <h2>Status</h2>
   <p>Early development — M3 field trials. The hub API lives at
-  <code>/api/reg</code>, <code>/api/lookup/&lt;peerId&gt;</code> and
-  <code>/api/room/&lt;roomId&gt;</code>.</p>
+  <code>/api/reg</code>, <code>/api/lookup/&lt;peerId&gt;</code>,
+  <code>/api/room/&lt;roomId&gt;</code> and <code>/api/presence</code>.</p>
 
   <h2>Contact &amp; source</h2>
   <p>Development happens at
@@ -269,6 +291,28 @@
 </footer>
 
 <script>
+  // Anonymous live counter: /api/presence returns one number — how many
+  // apps heartbeated recently. No identity, no storage beyond token
+  // expiries; poll gently (60s) and stay hidden if the hub is unreachable.
+  (function () {
+    var badge = document.getElementById("live-badge");
+    var count = document.getElementById("live-count");
+    var word = document.getElementById("live-word");
+    function tick() {
+      fetch("/api/presence", { cache: "no-store" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (!j || typeof j.online !== "number") return;
+          count.textContent = String(j.online);
+          word.textContent = j.online === 1 ? "human" : "humans";
+          badge.hidden = false;
+        })
+        .catch(function () {});
+    }
+    tick();
+    setInterval(tick, 60000);
+  })();
+
   // Version/deployment metadata ships in /version.json and is updated with
   // every release; everything on this page is self-hosted.
   fetch("/version.json")
