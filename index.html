@@ -4,20 +4,57 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnlyHumans — encrypted chat between humans, no message servers</title>
-<meta name="description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub.">
+<meta name="description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub and a sealed fallback mailbox.">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/icon-256.png">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"OnlyHumans",
+"operatingSystem":"Windows, Linux","applicationCategory":"CommunicationApplication",
+"offers":{"@type":"Offer","price":"0"}}
+</script>
 <style>
   :root {
     --teal: #17a2b8; --teal-deep: #0d6e79; --teal-dim: #0c2f37;
+    --green: #22c55e; --amber: #f59e0b; --violet: #8b5cf6;
     --bg: #0e1518; --panel: #14202a; --line: #1f3038;
-    --ink: #d8e4e8; --muted: #7d95a0;
+    --ink: #d8e4e8; --muted: #8fa6b0;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
          background: var(--bg); color: var(--ink); }
   a { color: var(--teal); }
+  :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+  /* ---------- nav ---------- */
+  nav {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 1.2rem;
+    padding: .7rem 1.4rem;
+    background: rgba(14, 21, 24, .92); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  nav .brand { display: flex; align-items: center; gap: .55rem; }
+  nav .brand img { width: 26px; height: 26px; border-radius: 6px; }
+  nav .wordmark { font-weight: 700; color: #fff; font-size: 1rem; }
+  nav .wordmark b { color: var(--teal); }
+  nav .links { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+  nav .links a { color: var(--muted); text-decoration: none; font-size: .92rem; }
+  nav .links a:hover { color: var(--ink); }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: .45rem;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: .25rem .75rem; font-size: .85rem; color: var(--ink);
+    white-space: nowrap;
+  }
+  .live-pill[hidden] { display: none; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+              box-shadow: 0 0 8px rgba(34,197,94,.7); flex: 0 0 auto; }
+  @media (prefers-reduced-motion: no-preference) {
+    .live-dot { animation: livedot 2.4s ease-in-out infinite; }
+    @keyframes livedot { 0%,100% { opacity:.45 } 50% { opacity:1 } }
+  }
+  @media (max-width: 760px) { nav .links { display: none; } }
 
   /* ---------- hero ---------- */
   .hero {
@@ -27,31 +64,20 @@
       radial-gradient(ellipse 50% 60% at 15% 85%, rgba(13,110,121,.12), transparent 60%),
       var(--bg);
     border-bottom: 1px solid var(--line);
-    padding: 4.5rem 1.5rem 4rem;
+    padding: 4rem 1.5rem 3.4rem;
   }
   .hero-inner { max-width: 1000px; margin: 0 auto; display: flex; gap: 3rem;
                 align-items: center; justify-content: space-between; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: .8rem; }
-  .brand img { width: 44px; height: 44px; }
-  .wordmark { font-size: 1.35rem; font-weight: 700; letter-spacing: .02em; color: #fff; }
-  .wordmark b { color: var(--teal); font-weight: 700; }
   .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.12;
-             color: #fff; margin: 1.2rem 0 1rem; max-width: 22ch; }
+             color: #fff; margin: 1.1rem 0 1rem; max-width: 22ch; }
   .hero h1 em { font-style: normal; color: var(--teal); }
   .hero p.lead { font-size: 1.12rem; line-height: 1.6; color: #a9bcc4; max-width: 46ch; }
+  .hero-live { margin: 1.4rem 0 0; font-size: 1.05rem; color: var(--ink); }
+  .hero-live b { color: #fff; font-size: 1.45rem; }
+  .hero-live .live-dot { display: inline-block; width: 10px; height: 10px; margin-right: .5rem; }
+  .hero-live.zero b { color: var(--muted); font-weight: 500; font-size: 1.05rem; }
 
-  .live-badge { margin-top: 1.6rem; display: inline-flex; align-items: center; gap: .6rem;
-                background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
-                padding: .45rem 1rem; font-size: .92rem; color: var(--ink); }
-  .live-badge[hidden] { display: none; }
-  .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #22c55e;
-              box-shadow: 0 0 8px rgba(34,197,94,.7); flex: 0 0 auto; }
-  @media (prefers-reduced-motion: no-preference) {
-    .live-dot { animation: livedot 2.4s ease-in-out infinite; }
-    @keyframes livedot { 0%,100% { opacity:.45 } 50% { opacity:1 } }
-  }
-
-  .dl-box { margin-top: 2rem; display: flex; flex-direction: column; gap: .55rem; }
+  .dl-box { margin-top: 1.8rem; display: flex; flex-direction: column; gap: .55rem; }
   a.dl {
     display: inline-flex; align-items: center; gap: .7rem; width: fit-content;
     background: linear-gradient(135deg, var(--teal), var(--teal-deep));
@@ -63,12 +89,9 @@
   a.dl:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(23,162,184,.35); }
   a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
              box-shadow: none; margin-top: .55rem; }
-  a.dl.alt:hover { box-shadow: 0 8px 24px rgba(23,162,184,.22); }
-  a.dl svg { width: 20px; height: 20px; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .dl-note { font-size: .85rem; color: var(--muted); max-width: 46ch; line-height: 1.5; }
 
-  /* mesh illustration */
   .mesh { flex: 0 0 auto; width: min(360px, 80vw); }
   .mesh .node { fill: var(--teal); }
   .mesh .hub  { fill: #33505c; }
@@ -82,21 +105,22 @@
   }
 
   /* ---------- sections ---------- */
-  main { max-width: 1000px; margin: 0 auto; padding: 3rem 1.5rem; }
-  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-              gap: 1rem; margin: 0 0 2.5rem; }
-  .feature { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-             padding: 1.15rem 1.2rem; }
-  .feature svg { width: 26px; height: 26px; margin-bottom: .6rem; }
-  .feature h3 { font-size: .98rem; color: #fff; margin-bottom: .35rem; }
-  .feature p { font-size: .88rem; color: var(--muted); line-height: 1.55; }
+  main { max-width: 1000px; margin: 0 auto; padding: 2.6rem 1.5rem; }
+  main h2 { color: #fff; margin: 2.4rem 0 .8rem; font-size: 1.3rem; }
+  main p, main li { line-height: 1.65; }
+  code { background: var(--teal-dim); padding: 2px 6px; border-radius: 4px; font-size: .9em; }
 
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-          padding: 1.4rem 1.5rem; margin: 1rem 0; }
+  .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+           gap: 1rem; }
+  .proof .stat { background: var(--panel); border: 1px solid var(--line);
+                 border-radius: 12px; padding: 1.2rem 1.3rem; }
+  .proof .n { font-size: 2rem; font-weight: 700; color: var(--teal); }
+  .proof .t { color: #fff; font-weight: 600; margin: .2rem 0 .3rem; }
+  .proof .d { color: var(--muted); font-size: .9rem; line-height: 1.5; }
 
-  /* ---------- screenshot gallery ---------- */
-  .gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-             gap: 1rem; margin: .5rem 0 1.5rem; }
+  /* gallery as a 3-step story */
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+           gap: 1rem; margin: .5rem 0 1rem; }
   .shot { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
           overflow: hidden; }
   .shot a { display: block; border-bottom: 1px solid var(--line); }
@@ -104,9 +128,54 @@
   .shot figcaption { padding: .8rem 1rem .9rem; font-size: .85rem;
                      color: var(--muted); line-height: 1.55; }
   .shot figcaption b { color: var(--ink); }
-  main h2 { color: #fff; margin: 2rem 0 .6rem; font-size: 1.25rem; }
-  main p, main li { line-height: 1.65; }
-  code { background: var(--teal-dim); padding: 2px 6px; border-radius: 4px; font-size: .9em; }
+  .stepnum { display: inline-flex; width: 22px; height: 22px; border-radius: 50%;
+             background: var(--teal-dim); color: var(--teal); font-weight: 700;
+             align-items: center; justify-content: center; font-size: .8rem;
+             margin-right: .4rem; }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 1rem; }
+
+  /* how it works: layer toggle */
+  .layers { margin-top: .6rem; }
+  .layer-tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .9rem; }
+  .layer-tabs button {
+    background: var(--panel); color: var(--muted); border: 1px solid var(--line);
+    border-radius: 999px; padding: .45rem 1.1rem; font-size: .92rem; cursor: pointer;
+  }
+  .layer-tabs button[aria-selected="true"] {
+    color: #fff; border-color: var(--teal-deep); background: var(--teal-dim);
+  }
+  .layer { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           padding: 1.2rem 1.4rem; }
+  .layer h3 { color: #fff; font-size: 1rem; margin-bottom: .4rem; }
+  .layer p { color: #a9bcc4; font-size: .95rem; }
+  .layer .tag { color: var(--teal); font-family: ui-monospace, Consolas, monospace;
+                font-size: .8rem; }
+
+  /* security tiers */
+  .tier { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+          padding: 1.2rem 1.4rem; margin: .7rem 0; }
+  .tier h3 { font-size: 1.02rem; margin-bottom: .5rem; color: #fff; }
+  .tier ul { list-style: none; }
+  .tier li { padding: .25rem 0 .25rem 1.6rem; position: relative; color: #a9bcc4;
+             font-size: .93rem; }
+  .tier li::before { position: absolute; left: 0; font-weight: 700; }
+  .tier.ok li::before { content: "✔"; color: var(--green); }
+  .tier.meta li::before { content: "◐"; color: var(--amber); }
+  .tier.out li::before { content: "✕"; color: var(--muted); }
+  .tier .verdict { font-size: .85rem; color: var(--muted); margin-top: .4rem; }
+
+  /* faq */
+  details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+            padding: .8rem 1.1rem; margin: .5rem 0; }
+  details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem; }
+  details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
+
+  /* changelog */
+  .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; }
+  .cl div { margin: .55rem 0; }
+  .cl b { color: var(--teal); font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
+  .cl span { color: #a9bcc4; font-size: .92rem; }
 
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.6rem;
            text-align: center; font-size: .85rem; color: var(--muted); line-height: 1.7; }
@@ -115,47 +184,58 @@
 </head>
 <body>
 
+<nav>
+  <div class="brand">
+    <img src="/logo.png" alt="OnlyHumans logo" width="26" height="26">
+    <span class="wordmark">only<b>humans</b></span>
+  </div>
+  <div class="links">
+    <a href="#see-it-work">See it work</a>
+    <a href="#how-it-works">How it works</a>
+    <a href="#security">Security</a>
+    <a href="#faq">FAQ</a>
+    <a href="#changelog">Changelog</a>
+  </div>
+  <span class="live-pill" id="live-pill" hidden title="Running apps heartbeat an anonymous one-session token — no names, no peer ids.">
+    <span class="live-dot" aria-hidden="true"></span>
+    <span><b id="live-count">0</b> <span id="live-word">humans</span> online</span>
+  </span>
+</nav>
+
 <div class="hero">
   <div class="hero-inner">
     <div>
-      <div class="brand">
-        <img src="/logo.png" alt="OnlyHumans logo" width="44" height="44" style="border-radius:10px">
-        <span class="wordmark">only<b>humans</b></span>
-      </div>
       <h1>Chat that never passes through <em>a server</em>.</h1>
       <p class="lead">One room. Everyone who opens the app is in it. Messages
       travel straight between devices, sealed end-to-end — this site only ever
-      holds signed, expiring IP addresses so peers can find each other.</p>
+      holds signed, expiring addresses so peers can find each other.</p>
 
-      <div class="live-badge" id="live-badge" hidden
-           title="Each running app beacons an anonymous one-session token every two minutes — no names, no peer ids. The count fades within a few minutes of apps closing.">
+      <p class="hero-live" id="hero-live" hidden>
         <span class="live-dot" aria-hidden="true"></span>
-        <span><b id="live-count">0</b> <span id="live-word">humans</span> online right now</span>
-      </div>
+        <span id="hero-live-text"></span>
+      </p>
 
       <div class="dl-box">
-        <a class="dl" id="dl-btn" href="/download/OnlyHumans-Setup-1.0.1.exe" download>
+        <a class="dl" id="dl-btn" href="/download/OnlyHumans-Setup-1.0.14.exe" download>
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>Download for Windows</span>
+          <span id="dl-label">Download for Windows</span>
         </a>
-        <span class="dl-meta" id="dl-meta">v1.0.1 · 5.4 MB</span>
-        <a class="dl alt" id="dl-linux-btn" href="/download/OnlyHumans_1.0.0_amd64.AppImage" download>
+        <span class="dl-meta" id="dl-meta">v1.0.14 · 5.5 MB</span>
+        <a class="dl alt" id="dl-alt" href="/download/OnlyHumans_1.0.0_amd64.AppImage" download>
           <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-          <span>Download for Linux</span>
+          <span id="dl-alt-label">Download for Linux</span>
         </a>
-        <span class="dl-meta" id="dl-linux-meta">v1.0.0 · AppImage 87 MB ·
+        <span class="dl-meta" id="dl-alt-meta">v1.0.0 · AppImage 87 MB ·
         <a id="dl-deb" href="/download/OnlyHumans_1.0.0_amd64.deb">.deb 10.7&nbsp;MB</a> (Debian/Ubuntu/Mint)</span>
-        <span class="dl-note">Windows 10/11: run the installer and you're in
-        the room — nothing to configure, no account to create. Linux: the
-        AppImage runs on most 64-bit distros (make it executable, then open
-        it); the .deb suits Debian, Ubuntu and Mint. Both platforms land in
-        the same room. Very old distros may need a newer WebKitGTK; if a
-        window doesn't appear, launch with
-        <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code>.</span>
+        <span class="dl-note">Install, pick any name, and you're in the room —
+        nothing to configure, no account to create. Windows 10/11 and Linux
+        (AppImage for most 64-bit distros, make it executable; very old distros
+        may need a newer WebKitGTK — launch with
+        <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code> if no window appears).</span>
       </div>
     </div>
 
@@ -169,7 +249,7 @@
         <circle class="node" cx="40" cy="190" r="9"/>
         <circle class="hub" cx="330" cy="300" r="6"/>
         <path class="edge" d="M320 170 L330 300" stroke-dasharray="4 4"/>
-        <text x="300" y="288" fill="#7d95a0" font-size="10" font-family="monospace">hub</text>
+        <text x="300" y="288" fill="#8fa6b0" font-size="10" font-family="monospace">hub</text>
       </g>
       <g class="pulse">
         <circle class="node" cx="110" cy="90" r="20" fill="none" stroke="#17a2b8" opacity=".5"/>
@@ -182,106 +262,197 @@
 </div>
 
 <main>
-  <div class="features">
-    <div class="feature">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M12 3 4 6v6c0 5 3.4 7.9 8 9 4.6-1.1 8-4 8-9V6l-8-3z" stroke="#17a2b8" stroke-width="1.6"/><path d="m9 12 2 2 4-4" stroke="#17a2b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <h3>End-to-end encrypted</h3>
-      <p>Per-message keys derived from a room key that never touches a server. Frames are padded, so even their lengths stay quiet.</p>
+
+  <div class="proof">
+    <div class="stat">
+      <div class="n">0</div>
+      <div class="t">servers read your words</div>
+      <div class="d">Messages go device to device, sealed on your device with
+      per-message keys. The hub stores addresses and sealed fallback mail —
+      never a word it could read.</div>
     </div>
-    <div class="feature">
-      <svg viewBox="0 0 24 24" fill="none"><circle cx="6" cy="6" r="2.6" stroke="#17a2b8" stroke-width="1.6"/><circle cx="18" cy="8" r="2.6" stroke="#17a2b8" stroke-width="1.6"/><circle cx="11" cy="18" r="2.6" stroke="#17a2b8" stroke-width="1.6"/><path d="M8.3 7 15.6 7.9 M7 8.2 9.9 15.8 M16.6 10.2 13 16.3" stroke="#17a2b8" stroke-width="1.4" stroke-linecap="round"/></svg>
-      <h3>Peer-to-peer mesh</h3>
-      <p>Messages hop directly between members. The hub can only help peers find each other — it can't read, store, or deliver a single word.</p>
+    <div class="stat">
+      <div class="n">2</div>
+      <div class="t">platforms, one room</div>
+      <div class="d">Windows and Linux installers land everyone in the same
+      encrypted room — no accounts, no invites to configure, just a name.</div>
     </div>
-    <div class="feature">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="3" y="4" width="18" height="13" rx="3" stroke="#17a2b8" stroke-width="1.6"/><path d="M8 21h8M12 17v4" stroke="#17a2b8" stroke-width="1.6" stroke-linecap="round"/><path d="m9 9.5 2 2-2 2M13 13.5h2" stroke="#17a2b8" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <h3>One shared room</h3>
-      <p>Install, open, you're in. The first person ever to open the app created the room and its key; the community key gates who can join.</p>
-    </div>
-    <div class="feature">
-      <svg viewBox="0 0 24 24" fill="none"><path d="M4 12a8 8 0 0 1 14-5.3L20 8M20 12a8 8 0 0 1-14 5.3L4 16" stroke="#17a2b8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 4v4h-4M4 20v-4h4" stroke="#17a2b8" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <h3>Rotatable keys</h3>
-      <p>The room host can rotate the room key at any time. Each new key is sealed under the old one — only current members ever learn it.</p>
-    </div>
-    <div class="feature">
-      <svg viewBox="0 0 24 24" fill="none"><rect x="5" y="10" width="14" height="10" rx="2.5" stroke="#17a2b8" stroke-width="1.7"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="#17a2b8" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="15" r="1.6" fill="#17a2b8"/></svg>
-      <h3>Code-word rooms</h3>
-      <p>Type a code at the door and you're in a room with everyone who uses the same word. The room is derived on each device — the word itself is never transmitted. <b>+ New room</b> in the app opens a parallel window with its own name and code, side by side with the room you're in.</p>
+    <div class="stat">
+      <div class="n">1</div>
+      <div class="t">shared key gates the door</div>
+      <div class="d">A community key embedded in the installer decides who can
+      enter. Rotate the room key and the door closes behind you, forever.</div>
     </div>
   </div>
 
-  <h2 id="screenshots">The app, live</h2>
-  <div class="gallery">
+  <h2 id="see-it-work">See it work</h2>
+  <div class="steps">
     <figure class="shot">
       <a href="/screenshots/welcome-gate.png" target="_blank" rel="noopener">
-        <img src="/screenshots/welcome-gate.png" alt="OnlyHumans first-run screen: a name field and an optional room code field" width="776" height="679" loading="lazy">
+        <img src="/screenshots/welcome-gate.png" alt="First run: a name field and an optional room code field" width="776" height="679" loading="lazy">
       </a>
-      <figcaption><b>First run.</b> Pick a name — and, optionally, a room
-      code. Leave it empty to land in the main room; type a word and you'll
-      meet exactly the people who typed the same word.</figcaption>
+      <figcaption><span class="stepnum">1</span><b>First run.</b> Pick a name —
+      and, optionally, a room code. Leave it empty to land in the room everyone
+      shares; type a word and you'll meet exactly the people who typed the same
+      word.</figcaption>
     </figure>
     <figure class="shot">
       <a href="/screenshots/code-room-host.png" target="_blank" rel="noopener">
-        <img src="/screenshots/code-room-host.png" alt="OnlyHumans code room: amber code-gated badge, member list, message received, Rotate key and Clear history controls" width="776" height="679" loading="lazy">
+        <img src="/screenshots/code-room-host.png" alt="A code room from the first member: people list, command bar, e2e pills" width="776" height="679" loading="lazy">
       </a>
-      <figcaption><b>A code room.</b> The amber CODE-GATED badge marks a
-      room addressed by a shared word. The first person in hosts it and
-      holds the usual controls — rotate key, clear history.</figcaption>
+      <figcaption><span class="stepnum">2</span><b>The first one in hosts.</b>
+      The room switcher, the people list, and the quiet trust signals —
+      public/code, end-to-end sealed, room generation.</figcaption>
     </figure>
     <figure class="shot">
       <a href="/screenshots/code-room-guest.png" target="_blank" rel="noopener">
-        <img src="/screenshots/code-room-guest.png" alt="OnlyHumans code room from a second machine: same room joined by typing the same code word" width="776" height="679" loading="lazy">
+        <img src="/screenshots/code-room-guest.png" alt="The same room from a second machine that typed the same code word" width="776" height="679" loading="lazy">
       </a>
-      <figcaption><b>Same word, same room.</b> This member typed the code
-      with different capitalization — the word folds to one canonical form,
-      so everyone lands together without ever exchanging it.</figcaption>
+      <figcaption><span class="stepnum">3</span><b>Same word, same room.</b>
+      The second machine typed the code with different capitalization — the
+      word folds to one form, so everyone lands together without ever
+      exchanging it.</figcaption>
     </figure>
+  </div>
+  <div class="pair">
     <figure class="shot">
       <a href="/screenshots/main-room-host.png" target="_blank" rel="noopener">
-        <img src="/screenshots/main-room-host.png" alt="OnlyHumans host window: one public room, member list with usernames, Rotate key and Clear history controls" width="776" height="679" loading="lazy">
+        <img src="/screenshots/main-room-host.png" alt="The main room from the host's window" width="776" height="679" loading="lazy">
       </a>
-      <figcaption><b>The host's window.</b> One public room everyone lands in,
-      members listed by chosen name, and the host-only controls — rotate the
-      room key or clear history for everyone.</figcaption>
+      <figcaption><b>The main room, hosted.</b> Everyone who opens the app
+      lands here; the host holds the rotate and clear controls.</figcaption>
     </figure>
     <figure class="shot">
       <a href="/screenshots/main-room-guest.png" target="_blank" rel="noopener">
-        <img src="/screenshots/main-room-guest.png" alt="OnlyHumans guest window: same room from a second machine, usernames on messages, key epoch shown" width="776" height="679" loading="lazy">
+        <img src="/screenshots/main-room-guest.png" alt="The main room from a joining member's window" width="776" height="679" loading="lazy">
       </a>
-      <figcaption><b>A member joining.</b> Same room from a second machine —
-      usernames over incoming messages, the shared key epoch visible to
-      everyone, private chats one click away from the member list.</figcaption>
+      <figcaption><b>…and joined.</b> Same room from a second machine — names
+      on messages, private chats one click away from the people list.</figcaption>
     </figure>
   </div>
 
-  <div class="card">
-    <h2>How it works</h2>
-    <p>Your identity is a keypair generated on your device — no accounts, no
-    phone numbers. The only shared service is this address hub: a signed,
-    expiring {peer &rarr; address} directory, plus a signed pointer saying who
-    currently hosts the room. Peers verify every record themselves; the hub
-    stores bytes it cannot forge and cannot read. When you open the app you
-    prove knowledge of the community key, receive the room key sealed for
-    you, and talk directly to everyone in the room — the relay path, if your
-    network needs one, carries only ciphertext.</p>
-    <p style="margin-top:.7rem">The live counter at the top works the same
-    way: each running app beacons a random one-session token every two
-    minutes, expiring after five. The hub can count tokens — it can never
-    tie one to a name, a peer, or a room, and it stores nothing else. The
-    app shows the same link as a green dot in its header.</p>
-    <p style="margin-top:.7rem">When two members can't reach each other
-    directly, their sealed envelopes wait in a signed hub inbox and drain
-    through this site — within a minute or two — so delivery no longer
-    needs both sides online at once. The inbox carries only ciphertext;
-    the recipient verifies every sender, and the hub still can't read,
-    forge, or alter a single word.</p>
+  <h2 id="how-it-works">How it works</h2>
+  <div class="layers">
+    <div class="layer-tabs" role="tablist">
+      <button role="tab" id="tab-find" aria-selected="true">1 · Find</button>
+      <button role="tab" id="tab-talk" aria-selected="false">2 · Talk</button>
+      <button role="tab" id="tab-fallback" aria-selected="false">3 · Fallback</button>
+    </div>
+    <div class="layer" id="layer-find">
+      <h3>Finding each other <span class="tag">signed · expiring · unreadable</span></h3>
+      <p>Your identity is a keypair generated on your device — no accounts, no
+      phone numbers. The only shared service is this site: a signed, expiring
+      {peer → address} directory, plus a signed pointer saying who currently
+      hosts each room. Peers verify every record themselves; the hub stores
+      bytes it cannot forge and cannot read.</p>
+    </div>
+    <div class="layer" id="layer-talk" hidden>
+      <h3>Talking <span class="tag">direct · end-to-end · padded</span></h3>
+      <p>When you open the app you prove knowledge of the community key,
+      receive the room key sealed for you, and talk straight to everyone in
+      the room — per-message keys derived from a room key that never touches a
+      server, frames padded so even their lengths stay quiet. The relay path,
+      if your network needs one, carries only ciphertext.</p>
+    </div>
+    <div class="layer" id="layer-fallback" hidden>
+      <h3>When two people can't connect <span class="tag">sealed · signed · timestamped</span></h3>
+      <p>Hard networks happen. When direct delivery fails, sealed envelopes
+      wait in a signed hub inbox and drain through this site — within a minute
+      or two — so delivery no longer needs both sides online at once. The
+      inbox carries only ciphertext; the recipient verifies every sender, and
+      the hub still can't read, forge, or alter a single word. Delivered this
+      way, the app marks the message <b>⇄ site</b>.</p>
+    </div>
   </div>
 
-  <h2>Status</h2>
-  <p>Early development — M3 field trials. The hub API lives at
-  <code>/api/reg</code>, <code>/api/lookup/&lt;peerId&gt;</code>,
-  <code>/api/room/&lt;roomId&gt;</code>, <code>/api/presence</code> and
-  <code>/api/inbox</code>.</p>
+  <h2 id="security">Security, honestly</h2>
+  <p>Not "military-grade" adjectives — a graded model of what this app
+  actually protects, what it reveals, and what it doesn't claim to solve.</p>
+  <div class="tier ok">
+    <h3>Protected</h3>
+    <ul>
+      <li>Message content — sealed on your device with per-message keys, padded to hide lengths</li>
+      <li>Room keys — delivered sealed per member; rotation re-seals under the old key</li>
+      <li>Private chats — memory-only, vanish when both sides leave</li>
+      <li>Your identity — a keypair that exists only on your device</li>
+    </ul>
+    <p class="verdict">Intercepting traffic gets an attacker ciphertext, always.</p>
+  </div>
+  <div class="tier meta">
+    <h3>Visible to your own hub (this site)</h3>
+    <ul>
+      <li>That a peer id exists and its current addresses — signed by the peer, expiring in 5 minutes</li>
+      <li>Which peer currently hosts which room — same signing, same expiry</li>
+      <li>An anonymous "an app is online" token every two minutes — random per session, never tied to an identity</li>
+      <li>When direct delivery fails: sealed mailbox envelopes' sender/recipient ids, timing, and size — ciphertext only, signatures verified by recipients, not the hub</li>
+    </ul>
+    <p class="verdict">The hub is your own infrastructure and can never read a
+    word — but it (and anyone observing it) can learn this metadata. We say so
+    instead of hiding it.</p>
+  </div>
+  <div class="tier out">
+    <h3>Out of scope — honest limits</h3>
+    <ul>
+      <li>A compromised device: malware on your machine can read your screen</li>
+      <li>Guessable code words: a code room is isolation from strangers, not access control — pick unguessable words</li>
+      <li>Global traffic analysis: metadata-resistant routing is not implemented</li>
+    </ul>
+  </div>
+
+  <h2 id="faq">Questions friends actually ask</h2>
+  <details>
+    <summary>Do I need an account?</summary>
+    <p>No. Install, type any name, you're in. Your identity is a key generated
+    on your device the first time the app runs.</p>
+  </details>
+  <details>
+    <summary>Where do my messages live?</summary>
+    <p>On the members' devices, sealed. The main room's history survives
+    restarts on your machine; private chats live in memory and vanish when
+    both people leave. The website never sees or stores a single word.</p>
+  </details>
+  <details>
+    <summary>What happens if this site disappears?</summary>
+    <p>The site is only the address book and the fallback mailbox. Without it,
+    the app can't introduce NEW peers to each other — but people already
+    connected keep talking, and the site has no messages to lose.</p>
+  </details>
+  <details>
+    <summary>Who can join the main room?</summary>
+    <p>Anyone holding the installer — the community key inside it is the
+    ticket. The room host can rotate the key at any moment, which closes the
+    room to newcomers forever.</p>
+  </details>
+  <details>
+    <summary>What's a code room?</summary>
+    <p>Type a word at the door and you're in a parallel room with everyone who
+    types the same word. The word is never transmitted — each device derives
+    the same room from it. Great for "just us"; pick unguessable words.</p>
+  </details>
+  <details>
+    <summary>Someone was offline when I sent a message. Is it lost?</summary>
+    <p>No — since 1.0.12 the message waits sealed on the site's fallback
+    mailbox and arrives when they're back, usually within a minute or two.
+    It's marked <b>⇄ site</b> so the path is visible.</p>
+  </details>
+  <details>
+    <summary>Does it work on my phone?</summary>
+    <p>Not yet — Windows and Linux today, Android is planned. The desktop UI
+    is already designed to adapt.</p>
+  </details>
+
+  <h2 id="changelog">Changelog</h2>
+  <div class="cl">
+    <div><b>1.0.14</b> <span>— trust made visible: ⇄ site delivery markers, room narration ("mira joined"), humanized waiting states, one-click invites</span></div>
+    <div><b>1.0.13</b> <span>— new interface: command bar with room switcher, people-first sidebar, e2e + generation pills</span></div>
+    <div><b>1.0.12</b> <span>— the site mailbox: offline delivery through sealed, signed hub envelopes</span></div>
+    <div><b>1.0.11</b> <span>— self-healing room state; join freeze fixed at the UI layer</span></div>
+    <div><b>1.0.10</b> <span>— presence: anonymous online counter on the site, green link dot in the app</span></div>
+    <div><b>1.0.9</b> <span>— cross-NAT connectivity: observed-address hints, fixed-port port-forward mode</span></div>
+    <div><b>1.0.8</b> <span>— split-brain room healing + reset room control</span></div>
+    <div><b>1.0.6</b> <span>— key rotation now seals the room to newcomers, forever</span></div>
+    <div><b>1.0.0</b> <span>— first production release, Windows + Linux in one room</span></div>
+  </div>
 
   <h2>Contact &amp; source</h2>
   <p>Development happens at
@@ -298,21 +469,26 @@
 </footer>
 
 <script>
-  // Anonymous live counter: /api/presence returns one number — how many
-  // apps heartbeated recently. No identity, no storage beyond token
-  // expiries; poll gently (60s) and stay hidden if the hub is unreachable.
+  // Live presence — the same anonymous counter the app's green dot uses.
   (function () {
-    var badge = document.getElementById("live-badge");
-    var count = document.getElementById("live-count");
-    var word = document.getElementById("live-word");
+    var pill = document.getElementById("live-pill");
+    var hero = document.getElementById("hero-live");
+    var t = document.getElementById("hero-live-text");
     function tick() {
       fetch("/api/presence", { cache: "no-store" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) {
           if (!j || typeof j.online !== "number") return;
-          count.textContent = String(j.online);
-          word.textContent = j.online === 1 ? "human" : "humans";
-          badge.hidden = false;
+          var n = j.online, word = n === 1 ? "human" : "humans";
+          document.getElementById("live-count").textContent = String(n);
+          document.getElementById("live-word").textContent = word;
+          if (n === 0) {
+            t.textContent = "The room is empty right now — be the first";
+          } else {
+            t.innerHTML = "<b>" + n + "</b> " + word + " in the room right now";
+          }
+          pill.hidden = false;
+          hero.hidden = false;
         })
         .catch(function () {});
     }
@@ -320,32 +496,68 @@
     setInterval(tick, 60000);
   })();
 
-  // Version/deployment metadata ships in /version.json and is updated with
-  // every release; everything on this page is self-hosted.
-  fetch("/version.json")
-    .then((r) => (r.ok ? r.json() : null))
-    .then((v) => {
-      if (!v) return;
-      const meta = ["v" + v.version];
-      if (v.size) meta.push(v.size);
-      if (v.date) meta.push("deployed " + new Date(v.date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }));
-      document.getElementById("dl-meta").textContent = meta.join(" · ");
-      if (v.file) document.getElementById("dl-btn").href = v.file;
-      if (v.linux) {
-        if (v.linux.appimage) document.getElementById("dl-linux-btn").href = v.linux.appimage;
-        const lmParts = ["v" + (v.linux.version || v.version)];
-        if (v.linux.appimageSize) lmParts.push("AppImage " + v.linux.appimageSize);
-        const lm = document.getElementById("dl-linux-meta");
-        lm.innerHTML = lmParts.join(" · ") + " · " +
-          '<a href="' + (v.linux.deb || "#") + '">.deb ' +
-          (v.linux.debSize || "") + "&nbsp;MB</a> (Debian/Ubuntu/Mint)";
-      }
-      if (v.version) {
-        document.getElementById("deploy-line").textContent =
-          "site build " + v.version + " · " + v.date;
-      }
-    })
-    .catch(() => {});
+  // Layer toggle for "how it works".
+  (function () {
+    var keys = ["find", "talk", "fallback"];
+    keys.forEach(function (k) {
+      document.getElementById("tab-" + k).addEventListener("click", function () {
+        keys.forEach(function (k2) {
+          var on = k2 === k;
+          document.getElementById("tab-" + k2).setAttribute("aria-selected", on ? "true" : "false");
+          document.getElementById("layer-" + k2).hidden = !on;
+        });
+      });
+    });
+  })();
+
+  // Version metadata + OS-aware download ordering.
+  (function () {
+    var ua = navigator.userAgent;
+    var isLinux = /Linux/.test(ua) && !/Android/.test(ua);
+    var isMac = /Macintosh/.test(ua);
+    fetch("/version.json")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (!v) return;
+        var winMeta = ["v" + v.version];
+        if (v.size) winMeta.push(v.size);
+        if (v.date) winMeta.push("deployed " + new Date(v.date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }));
+        function setWin() {
+          document.getElementById("dl-label").textContent = "Download for Windows";
+          document.getElementById("dl-btn").href = v.file;
+          document.getElementById("dl-meta").textContent = winMeta.join(" · ");
+          document.getElementById("dl-alt").href = v.linux ? v.linux.appimage : "#";
+          document.getElementById("dl-alt-label").textContent = "Download for Linux";
+        }
+        function setLin() {
+          document.getElementById("dl-label").textContent = "Download for Linux";
+          document.getElementById("dl-btn").href = v.linux.appimage;
+          document.getElementById("dl-meta").textContent =
+            "v" + (v.linux.version || v.version) + " · AppImage " + (v.linux.appimageSize || "");
+          document.getElementById("dl-alt").href = v.file;
+          document.getElementById("dl-alt-label").textContent = "Download for Windows";
+        }
+        var altMeta = document.getElementById("dl-alt-meta");
+        var linuxLine = "v" + (v.linux.version || v.version) + " · AppImage " + (v.linux.appimageSize || "") +
+          " · <a href=\"" + (v.linux.deb || "#") + "\">.deb " + (v.linux.debSize || "") + "&nbsp;MB</a> (Debian/Ubuntu/Mint)";
+        if (v.linux) {
+          if (isLinux) { setLin(); } else { setWin(); }
+          altMeta.innerHTML = linuxLine;
+          if (isMac) {
+            altMeta.insertAdjacentHTML("afterbegin", "macOS isn't supported yet. ");
+          }
+        } else {
+          setWin();
+          document.getElementById("dl-alt").hidden = true;
+          altMeta.hidden = true;
+        }
+        if (v.version) {
+          document.getElementById("deploy-line").textContent =
+            "site build " + v.version + " · " + v.date;
+        }
+      })
+      .catch(function () {});
+  })();
 </script>
 </body>
 </html>
