@@ -29,8 +29,16 @@
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+  /* Fluid desktop scale: pixel-identical up to 1920px, then the whole page
+     grows with the monitor so a 4K screen gets a 4K site, not a letterbox. */
+  html { font-size: clamp(16px, 3px + 0.68vw, 26px); }
   body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-         background: var(--bg); color: var(--ink); }
+         background:
+           linear-gradient(rgba(23,162,184,.05) 1px, transparent 1px),
+           linear-gradient(90deg, rgba(23,162,184,.05) 1px, transparent 1px),
+           var(--bg);
+         background-size: 3rem 3rem, 3rem 3rem, auto;
+         color: var(--ink); }
   a { color: var(--teal); }
   :focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 
@@ -78,28 +86,38 @@
       radial-gradient(ellipse 50% 60% at 15% 85%, rgba(13,110,121,.12), transparent 60%),
       var(--bg);
     border-bottom: 1px solid var(--line);
-    padding: 5rem 1.5rem 4.2rem;
+    display: flex; align-items: center; justify-content: center;
+    padding: 4.5rem 1.5rem;
+    min-height: calc(100vh - 4.4rem);
+    min-height: calc(100svh - 4.4rem);
   }
-  .hero-inner { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column;
-                align-items: center; text-align: center; }
-  .hero-logo { width: 224px; height: 224px; border-radius: 52px;
-               box-shadow: 0 16px 64px rgba(23,162,184,.22); }
-  .hero h1 { font-size: clamp(2rem, 5vw, 3.1rem); line-height: 1.12;
-             color: #fff; margin: 1.3rem 0 1rem; max-width: 22ch; }
+  .hero-inner { width: 100%; max-width: min(1600px, 92vw); margin: 0 auto;
+                display: flex; flex-direction: column; align-items: center;
+                text-align: center; position: relative; }
+  .hero-copy { display: flex; flex-direction: column; align-items: center;
+               position: relative; z-index: 1; }
+  .hero-logo { width: clamp(200px, 13vw, 460px); height: auto; aspect-ratio: 1;
+               border-radius: 23%;
+               box-shadow: 0 24px 96px rgba(23,162,184,.32); }
+  .hero h1 { font-size: clamp(2rem, 1.2rem + 2vw, 4.45rem); line-height: 1.1;
+             color: #fff; margin: 1.6rem 0 1.1rem; max-width: 22ch;
+             text-wrap: balance; }
   .hero h1 em { font-style: normal; color: var(--teal); }
-  .hero p.lead { font-size: 1.12rem; line-height: 1.6; color: #a9bcc4; max-width: 46ch; }
+  .hero p.lead { font-size: clamp(1.05rem, .95rem + .35vw, 1.5rem);
+                 line-height: 1.65; color: #a9bcc4; max-width: 46ch; }
   .hero-live { margin: 1.4rem 0 0; font-size: 1.05rem; color: var(--ink); }
   .hero-live b { color: #fff; font-size: 1.45rem; }
   .hero-live .live-dot { display: inline-block; width: 10px; height: 10px; margin-right: .5rem; }
   .hero-live.zero b { color: var(--muted); font-weight: 500; font-size: 1.05rem; }
 
-  .dl-box { margin-top: 1.8rem; display: flex; flex-direction: column; align-items: center; gap: .55rem; }
-  .dl-row { display: flex; gap: .8rem; flex-wrap: wrap; justify-content: center; }
+  .dl-box { margin-top: 1.9rem; display: flex; flex-direction: column; align-items: center; gap: .7rem; }
+  .dl-row { display: flex; gap: .9rem; flex-wrap: wrap; justify-content: center; }
   a.dl {
     display: inline-flex; align-items: center; gap: .7rem; width: fit-content;
     background: linear-gradient(135deg, var(--teal), var(--teal-deep));
-    color: #fff; padding: .85rem 1.6rem; border-radius: 10px;
-    text-decoration: none; font-weight: 600; font-size: 1.05rem;
+    color: #fff; padding: .9rem 1.9rem; border-radius: 10px;
+    text-decoration: none; font-weight: 600;
+    font-size: clamp(1.05rem, 1rem + .2vw, 1.25rem);
     box-shadow: 0 6px 24px rgba(23,162,184,.25);
     transition: transform .12s ease, box-shadow .12s ease;
   }
@@ -107,9 +125,14 @@
   a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
              box-shadow: none; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
-  .dl-note { font-size: .85rem; color: var(--muted); max-width: 46ch; line-height: 1.5; }
+  .dl-note { font-size: .85rem; color: var(--muted); max-width: 52ch; line-height: 1.6;
+             margin-top: .3rem; }
 
-  .mesh { flex: 0 0 auto; width: min(360px, 80vw); margin-top: 2.4rem; opacity: .95; }
+  /* The mesh lives behind the centered content as a wide, quiet backdrop —
+     the logo is the hero, the network is the atmosphere. */
+  .mesh { position: absolute; left: 50%; top: 50%;
+          transform: translate(-50%, -50%);
+          flex: 0 0 auto; width: clamp(480px, 62vw, 1600px); opacity: .3; }
   .mesh .node { fill: var(--teal); }
   .mesh .hub  { fill: #33505c; }
   .mesh .edge { stroke: #2a4a56; stroke-width: 1.5; }
@@ -122,26 +145,34 @@
   }
 
   /* ---------- sections ---------- */
-  main { max-width: 1160px; margin: 0 auto; padding: 2.8rem 1.5rem; }
-  main h2 { color: #fff; margin: 2.4rem 0 .8rem; font-size: 1.3rem; }
+  main { max-width: min(2340px, 92vw); margin: 0 auto; padding: 2.8rem 1.5rem; }
+  main h2 { color: #fff; margin: 2.6rem 0 .9rem;
+            font-size: clamp(1.3rem, 1rem + .5vw, 1.9rem);
+            display: flex; align-items: center; gap: .8rem; }
+  main h2::before { content: ""; flex: 0 0 auto; width: .45rem; height: 1.5em;
+                    border-radius: 3px;
+                    background: linear-gradient(180deg, var(--teal), var(--teal-deep)); }
+  main h2::after { content: ""; flex: 1 1 auto; height: 1px;
+                   background: linear-gradient(90deg, var(--line), transparent); }
   main p, main li { line-height: 1.65; }
   code { background: var(--teal-dim); padding: 2px 6px; border-radius: 4px; font-size: .9em; }
 
-  .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
-           gap: 1rem; }
+  .proof { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+           gap: 1.25rem; }
   .proof .stat { background: var(--panel); border: 1px solid var(--line);
-                 border-radius: 12px; padding: 1.2rem 1.3rem; }
-  .proof .n { font-size: 2rem; font-weight: 700; color: var(--teal); }
+                 border-radius: 12px; padding: 1.4rem 1.5rem; }
+  .proof .n { font-size: clamp(2rem, 1.2rem + 1vw, 3.1rem); font-weight: 700; color: var(--teal); }
   .proof .t { color: #fff; font-weight: 600; margin: .2rem 0 .3rem; }
   .proof .d { color: var(--muted); font-size: .9rem; line-height: 1.5; }
 
   /* gallery as a 3-step story */
-  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
-           gap: 1rem; margin: .5rem 0 1rem; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(430px, 100%), 1fr));
+           gap: 1.25rem; margin: .5rem 0 1rem; }
   .shot { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
           overflow: hidden; }
-  .shot a { display: block; border-bottom: 1px solid var(--line); }
-  .shot img { display: block; width: 100%; height: auto; }
+  .shot a { display: block; border-bottom: 1px solid var(--line); overflow: hidden; }
+  .shot img { display: block; width: 100%; height: auto; transition: transform .25s ease; }
+  .shot a:hover img { transform: scale(1.025); }
   .shot figcaption { padding: .8rem 1rem .9rem; font-size: .85rem;
                      color: var(--muted); line-height: 1.55; }
   .shot figcaption b { color: var(--ink); }
@@ -149,8 +180,8 @@
              background: var(--teal-dim); color: var(--teal); font-weight: 700;
              align-items: center; justify-content: center; font-size: .8rem;
              margin-right: .4rem; }
-  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(480px, 100%), 1fr));
-          gap: 1rem; }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
+          gap: 1.25rem; }
 
   /* how it works: layer toggle */
   .layers { margin-top: .6rem; }
@@ -166,6 +197,11 @@
            padding: 1.5rem 1.7rem; }
   .layer h3 { color: #fff; font-size: 1rem; margin-bottom: .4rem; }
   .layer p { color: #a9bcc4; font-size: .95rem; max-width: 82ch; }
+  /* on ultra-wide the layer prose runs in two balanced columns so the
+     full-width panel doesn't trail off into empty space */
+  @media (min-width: 2200px) {
+    .layer p { max-width: none; columns: 2; column-gap: 3.5rem; }
+  }
   .layer .tag { color: var(--teal); font-family: ui-monospace, Consolas, monospace;
                 font-size: .8rem; }
 
@@ -190,12 +226,16 @@
             padding: .9rem 1.2rem; margin: 0; }
   .faq-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
               gap: .5rem; margin-top: .6rem; }
+  /* cap FAQ at 3 columns even on ultra-wide — 4 narrow columns read fragmented */
+  @media (min-width: 2200px) {
+    .faq-grid { grid-template-columns: repeat(3, 1fr); }
+  }
   details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem;
                     padding: .35rem 0; }
   details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
 
   /* changelog */
-  .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; max-width: 900px; }
+  .cl { border-left: 2px solid var(--line); margin-left: .4rem; padding-left: 1.1rem; max-width: min(980px, 100%); }
   .cl div { margin: .55rem 0; }
   .cl b { color: var(--teal); font-family: ui-monospace, Consolas, monospace; font-size: .88rem; }
   .cl span { color: #a9bcc4; font-size: .92rem; }
@@ -246,40 +286,42 @@
 
 <div class="hero">
   <div class="hero-inner">
-    <img class="hero-logo" src="/logo.png" alt="OnlyHumans logo" width="112" height="112">
-    <h1>Chat that never passes through <em>a server</em>.</h1>
-    <p class="lead">One room. Everyone who opens the app is in it. Messages
-    travel straight between devices, sealed end-to-end — this site only ever
-    holds signed, expiring addresses so peers can find each other.</p>
+    <div class="hero-copy">
+      <img class="hero-logo" src="/logo.png" alt="OnlyHumans logo" width="112" height="112">
+      <h1>Chat that never passes through <em>a server</em>.</h1>
+      <p class="lead">One room. Everyone who opens the app is in it. Messages
+      travel straight between devices, sealed end-to-end — this site only ever
+      holds signed, expiring addresses so peers can find each other.</p>
 
-    <p class="hero-live" id="hero-live" hidden>
-      <span class="live-dot" aria-hidden="true"></span>
-      <span id="hero-live-text"></span>
-    </p>
+      <p class="hero-live" id="hero-live" hidden>
+        <span class="live-dot" aria-hidden="true"></span>
+        <span id="hero-live-text"></span>
+      </p>
 
-    <div class="dl-box">
-      <div class="dl-row">
-        <a class="dl" id="dl-btn" href="/download/OnlyHumans-Setup-1.0.15.exe" download>
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span id="dl-label">Download for Windows</span>
-        </a>
-        <a class="dl alt" id="dl-alt" href="/download/OnlyHumans_1.0.14_amd64.AppImage" download>
-          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <span id="dl-alt-label">Download for Linux</span>
-        </a>
+      <div class="dl-box">
+        <div class="dl-row">
+          <a class="dl" id="dl-btn" href="/download/OnlyHumans-Setup-1.0.15.exe" download>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="dl-label">Download for Windows</span>
+          </a>
+          <a class="dl alt" id="dl-alt" href="/download/OnlyHumans_1.0.14_amd64.AppImage" download>
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span id="dl-alt-label">Download for Linux</span>
+          </a>
+        </div>
+        <span class="dl-meta" id="dl-meta">v1.0.15 · 5.5 MB</span>
+        <span class="dl-meta" id="dl-alt-meta">v1.0.14 · AppImage 84 MB ·
+        <a id="dl-deb" href="/download/OnlyHumans_1.0.14_amd64.deb">.deb 11&nbsp;MB</a> (Debian/Ubuntu/Mint)</span>
+        <span class="dl-note">Install, pick any name, and you're in the room —
+        nothing to configure, no account to create. <b>Each version is its own room</b> — to meet people on the newest app, keep yours up to date from this page. Windows 10/11 and Linux
+        (AppImage for most 64-bit distros, make it executable; very old distros
+        may need a newer WebKitGTK — launch with
+        <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code> if no window appears).</span>
       </div>
-      <span class="dl-meta" id="dl-meta">v1.0.15 · 5.5 MB</span>
-      <span class="dl-meta" id="dl-alt-meta">v1.0.14 · AppImage 84 MB ·
-      <a id="dl-deb" href="/download/OnlyHumans_1.0.14_amd64.deb">.deb 11&nbsp;MB</a> (Debian/Ubuntu/Mint)</span>
-      <span class="dl-note">Install, pick any name, and you're in the room —
-      nothing to configure, no account to create. <b>Each version is its own room</b> — to meet people on the newest app, keep yours up to date from this page. Windows 10/11 and Linux
-      (AppImage for most 64-bit distros, make it executable; very old distros
-      may need a newer WebKitGTK — launch with
-      <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code> if no window appears).</span>
     </div>
 
     <svg class="mesh" viewBox="0 0 360 320" aria-hidden="true">
@@ -292,7 +334,7 @@
         <circle class="node" cx="40" cy="190" r="9"/>
         <circle class="hub" cx="330" cy="300" r="6"/>
         <path class="edge" d="M320 170 L330 300" stroke-dasharray="4 4"/>
-        <text x="300" y="288" fill="#8fa6b0" font-size="10" font-family="monospace">hub</text>
+        <text x="298" y="288" fill="#8fa6b0" font-size="11" font-family="monospace">hub</text>
       </g>
       <g class="pulse">
         <circle class="node" cx="110" cy="90" r="20" fill="none" stroke="#17a2b8" opacity=".5"/>
