@@ -17,10 +17,11 @@ function redisEnv(): { url: string; token: string } | null {
   return { url: url.replace(/\/$/, ""), token };
 }
 
-// One round-trip for several commands (Upstash REST pipeline).
+// One round-trip for several commands (Upstash REST pipeline lives at a
+// separate /pipeline path — POSTing the array to the base URL 400s).
 async function redisPipe(commands: unknown[][]): Promise<any[]> {
   const { url, token } = redisEnv()!;
-  const r = await fetch(url, {
+  const r = await fetch(`${url}/pipeline`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify(commands),
