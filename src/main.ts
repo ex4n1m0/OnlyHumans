@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number; pending?: boolean }
+interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number; pending?: boolean; viaSite?: boolean }
 interface Contact { peer_id: string; name: string }
 interface MemberInfo { peer: string; name: string }
 interface RoomSnapshot { status: string; room: string | null; host: string | null; weAreHost: boolean; epoch: number; members: MemberInfo[]; updatedMs: number }
@@ -11,7 +11,7 @@ type NodeEvent =
   | { kind: "listening"; addr: string }
   | { kind: "joinStatus"; status: string }
   | { kind: "roomReady"; room: string; peer: string; weAreHost: boolean; epoch: number }
-  | { kind: "message"; room: string; sender: string; body: string; epoch: number }
+  | { kind: "message"; room: string; sender: string; body: string; epoch: number; viaSite?: boolean }
   | { kind: "membersChanged"; room: string; members: MemberInfo[] }
   | { kind: "messagesCleared"; room: string }
   | { kind: "rotated"; room: string; newEpoch: number }
@@ -148,6 +148,38 @@ async function boot() {
   // in the code's room universe instead of the main room.
   const codeRoom: boolean = await invoke("has_passcode");
   let messages: ChatMessage[] = [];
+  // Quiet narration lines interleaved with messages by time (session-only).
+  let narration: Array<{ ts: number; text: string }> = [];
+  const narrate = (text: string) => {
+    narration.push({ ts: Date.now(), text });
+    if (narration.length > 50) narration = narration.slice(-50);
+  };
+  // Arrival times of site-mailbox-delivered messages: a stored message
+  // whose timestamp falls inside a window gets the marker.
+  let viaSiteTimes: number[] = [];
+  const markViaSite = () => {
+    const now = Date.now();
+    viaSiteTimes.push(now);
+    viaSiteTimes = viaSiteTimes.filter((t) => now - t < 600_000);
+  };
+  const cameViaSite = (ts: number) => viaSiteTimes.some((t) => Math.abs(t - ts) < 2500);
+  // The friend-facing invite sentence for THIS room.
+  let roomCodeWord: string | null = null;
+  invoke<string | null>("passcode").then((c) => { roomCodeWord = c; }).catch(() => {});
+  const inviteText = () => roomCodeWord
+    ? `Get OnlyHumans at onlyhumans.deepflux.space — install it, enter any name, then use the code word: ${roomCodeWord}`
+    : `Get OnlyHumans at onlyhumans.deepflux.space — install it, pick any name, and you're in the room everyone shares.`;
+  const copyInvite = async () => {
+    const t = inviteText();
+    try {
+      await navigator.clipboard.writeText(t);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = t; document.body.appendChild(ta); ta.select();
+      document.execCommand("copy"); ta.remove();
+    }
+    toast("Invite copied — paste it to a friend");
+  };
 
   // Site link (anonymous presence beacon): green = the site's public
   // counter currently includes us. Beats arrive with each hub cycle
@@ -251,6 +283,7 @@ async function boot() {
     try {
     switch (p.kind) {
       case "message": {
+        if (p.viaSite) markViaSite();
         if (p.room === room) {
           // Main room: the core persists; refresh from the store.
           if (activeRoom === room) await refreshMessages();
@@ -261,6 +294,7 @@ async function boot() {
             dm.msgs.push({
               id: Date.now(), sender: p.sender, body: p.body,
               ts: Date.now(), outgoing: false, epoch: p.epoch,
+              viaSite: p.viaSite,
             });
             if (activeRoom === p.room) {
               render();
@@ -291,8 +325,16 @@ async function boot() {
         break;
       }
       case "membersChanged": {
+        const before = new Set(members.map((m) => m.peer));
         room = p.room;
         members = p.members;
+        const after = new Set(members.map((m) => m.peer));
+        for (const m of members) {
+          if (!before.has(m.peer) && m.peer !== myId) narrate(`${memberLabel(m)} joined`);
+        }
+        for (const old of before) {
+          if (!after.has(old) && old !== myId) narrate(`${displayName(old)} left`);
+        }
         render();
         break;
       }
@@ -308,6 +350,7 @@ async function boot() {
         break;
       }
       case "rotated": {
+        narrate(`key rotated to generation ${p.newEpoch} — the room is closed to newcomers`);
         epoch = p.newEpoch;
         if (p.room === room) {
           await refreshMessages();
@@ -361,14 +404,13 @@ async function boot() {
   }
 
   function statusLine(): string {
-    const secs = Math.floor((Date.now() - joinStart) / 1000);
     switch (status) {
       case "hosting": return "you host the room";
       case "connected": return `connected · ${displayName(hostPeer)} hosts`;
-      case "joining": return `joining the room… ${secs}s`;
-      case "founding": return "creating the room (first member)…";
-      case "sealed": return "room closed by key rotation";
-      default: return `looking for the room… ${secs}s`;
+      case "joining": return "knocking — proving you know the way in…";
+      case "founding": return "creating the room — you're the first…";
+      case "sealed": return "closed by key rotation";
+      default: return "finding the room…";
     }
   }
 
@@ -527,16 +569,26 @@ function closeMenus() {
                 })()}
           </div>
           <div class="messages" id="msgs">
-            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${codeRoom ? "You're in — only people who entered the same code word can land here." : "You're in — everyone who opens the app joins this room. Say hi."}</div>` : ""}
-            ${(activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? [])).map((m) => {
-              const showSender = activeRoom === room && !m.outgoing;
-              const hue = peerHue(m.sender);
-              return `
+            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${codeRoom ? (members.filter((m) => m.peer !== myId).length === 0 ? `Nobody else has used this code word yet — they land here the moment they type the same word. <button id="invite-btn" class="linklike">Invite someone</button>` : "You're in — only people who typed this room's code word can be here.") : (members.filter((m) => m.peer !== myId).length === 0 ? `You're the first here. Everyone who opens the app lands in this room — say hi, or <button id="invite-btn" class="linklike">invite a friend</button>.` : "You're in — everyone who opens the app joins this room. Say hi.")}</div>` : ""}
+            ${((): string => {
+              const msgs = activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? []);
+              const items: Array<{ ts: number; html: string }> = msgs.map((m) => {
+                const showSender = activeRoom === room && !m.outgoing;
+                const hue = peerHue(m.sender);
+                const via = !m.outgoing && (m.viaSite || (activeRoom === room && cameViaSite(m.ts)));
+                return { ts: m.ts, html: `
               ${showSender ? `<div class="sender" style="color:hsl(${hue} 65% 70%)">${escapeHtml(displayName(m.sender))}</div>` : ""}
               <div class="msg ${m.outgoing ? "out" : "in"}">
                 ${escapeHtml(m.body)}
-                <div class="meta">${fmtTime(m.ts)}${activeRoom === room ? ` · e${m.epoch}` : ""}${m.pending && offlineTargets().length ? ' · <span class="pend">waiting</span>' : ""}</div>
-              </div>`;}).join("")}
+                <div class="meta">${fmtTime(m.ts)}${activeRoom === room ? ` · gen ${m.epoch}` : ""}${via ? ' · <span class="viasite" title="arrived through the site mailbox while you were away">⇄ site</span>' : ""}${m.pending && offlineTargets().length ? ' · <span class="pend">waiting</span>' : ""}</div>
+              </div>` };
+              });
+              if (activeRoom === room) {
+                for (const n of narration) items.push({ ts: n.ts, html: `<div class="narration">${escapeHtml(n.text)}</div>` });
+              }
+              items.sort((a, b) => a.ts - b.ts);
+              return items.map((i) => i.html).join("");
+            })()}
           </div>
           ${offlineTargets().length ? `
           <div class="pending-strip">
@@ -640,6 +692,11 @@ function closeMenus() {
       if (document.getElementById("open-menu")) { closeMenus(); return; }
       const showRoomMenu = () => {
         openMenu(el, [
+          {
+            label: "Invite to this room",
+            hint: "copies a message a friend can follow",
+            act: () => void copyInvite(),
+          },
           ...(isHost ? [{
             label: "Rotate key…",
             hint: "new key — closes the room to newcomers forever",
@@ -782,6 +839,7 @@ function closeMenus() {
       });
     }
 
+    document.getElementById("invite-btn")?.addEventListener("click", () => void copyInvite());
     document.getElementById("send")?.addEventListener("click", sendCurrent);
     document.getElementById("send-text")?.addEventListener("keydown", (e) => {
       if ((e as KeyboardEvent).key === "Enter") sendCurrent();

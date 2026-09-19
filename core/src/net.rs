@@ -160,7 +160,7 @@ pub enum NodeEvent {
     /// Progress of the automatic join flow, for the UI status line.
     JoinStatus { status: String },
     RoomReady { room: String, peer: String, we_are_host: bool, epoch: u64 },
-    Message { room: String, sender: String, body: String, epoch: u64 },
+    Message { room: String, sender: String, body: String, epoch: u64, via_site: bool },
     MembersChanged { room: String, members: Vec<crate::rooms::MemberInfo> },
     MessagesCleared { room: String },
     Rotated { room: String, new_epoch: u64 },
@@ -698,7 +698,7 @@ async fn drain_mailbox(
         let events = rooms.handle(from, env);
         process_room_events(rooms, store, &from, &events, event_tx);
         for ev in events {
-            dispatch_room_event(swarm, outbox, inflight, &from, ev, event_tx);
+            dispatch_room_event(swarm, outbox, inflight, &from, ev, true, event_tx);
         }
     }
 }
@@ -1261,7 +1261,7 @@ fn handle_swarm_event(
                         let events = rooms.handle(peer, request);
                         process_room_events(rooms, &store, &peer, &events, event_tx);
                         for ev in events {
-                            dispatch_room_event(swarm, outbox, inflight, &peer, ev, event_tx);
+                            dispatch_room_event(swarm, outbox, inflight, &peer, ev, false, event_tx);
                         }
                         // Always acknowledge requests.
                         let _ = swarm
@@ -1273,7 +1273,7 @@ fn handle_swarm_event(
                         let events = rooms.handle(peer, response);
                         process_room_events(rooms, &store, &peer, &events, event_tx);
                         for ev in events {
-                            dispatch_room_event(swarm, outbox, inflight, &peer, ev, event_tx);
+                            dispatch_room_event(swarm, outbox, inflight, &peer, ev, false, event_tx);
                         }
                     }
                 }
@@ -1390,6 +1390,7 @@ fn dispatch_room_event(
     inflight: &mut HashMap<PeerId, VecDeque<Envelope>>,
     from: &PeerId,
     ev: RoomEvent,
+    via_site: bool,
     event_tx: &mpsc::UnboundedSender<NodeEvent>,
 ) {
     match ev {
@@ -1411,6 +1412,7 @@ fn dispatch_room_event(
                 sender,
                 body: String::from_utf8_lossy(&body).into_owned(),
                 epoch,
+                via_site: false,
             });
         }
         RoomEvent::MembersChanged { room_id_hex, members } => {
