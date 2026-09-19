@@ -1,7 +1,6 @@
 // OnlyHumans UI — one global room. Everyone who runs the app joins the
 // same room automatically; the first ever member founded it.
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { invoke, listen } from "./uibridge";
 
 interface ChatMessage { id: number; sender: string; body: string; ts: number; outgoing: boolean; epoch: number; pending?: boolean; viaSite?: boolean }
 interface Contact { peer_id: string; name: string }
@@ -139,7 +138,7 @@ async function boot() {
   let hostPeer = "";
   let members: MemberInfo[] = [];
   let renamingPeer: string | null = null;
-  let editingCode = false;
+  let switchModalOpen = false;
   let clearArmed = false;
   let clearTimer: number | undefined;
   let rotateModalOpen = false;
@@ -180,6 +179,8 @@ async function boot() {
     }
     toast("Invite copied — paste it to a friend");
   };
+  const newRoom = () =>
+    void invoke("open_parallel_room").catch((err) => toast(String(err)));
 
   // Site link (anonymous presence beacon): green = the site's public
   // counter currently includes us. Beats arrive with each hub cycle
@@ -218,10 +219,18 @@ async function boot() {
   }, 1000);
 
   document.addEventListener("keydown", (e) => {
-    if ((e as KeyboardEvent).key === "Escape") {
+    const ke = e as KeyboardEvent;
+    if (ke.key === "Escape") {
       closeMenus();
       if (rotateModalOpen) closeRotateModal();
       if (resetModalOpen) closeResetModal();
+      if (switchModalOpen) closeSwitchModal();
+    }
+    // Alt+N: open a second window in its own room (the visible
+    // "+ New room" button, as a keyboard shortcut).
+    if (ke.altKey && (ke.key === "n" || ke.key === "N")) {
+      e.preventDefault();
+      newRoom();
     }
   });
   // Dismiss any open menu on an outside click (menu items stop
@@ -424,6 +433,11 @@ async function boot() {
     render();
   }
 
+  function closeSwitchModal() {
+    switchModalOpen = false;
+    render();
+  }
+
 function toast(text: string) {
   const box = ensureToasts();
   const t = document.createElement("div");
@@ -477,35 +491,44 @@ function closeMenus() {
 
   function render() {
     const ready = room !== null;
+    const others = members.filter((m) => m.peer !== myId);
     // A full re-render fires on every incoming message; keep whatever the
-    // user is typing (value + focus) so the composer survives it.
-    const prevSend = document.getElementById("send-text") as HTMLInputElement | null;
+    // user is typing (value + focus + caret) so the composer survives it.
+    const prevSend = document.getElementById("send-text") as HTMLTextAreaElement | null;
     const sendState = prevSend
       ? { value: prevSend.value, focused: document.activeElement === prevSend }
-      : null;
-    const prevRename = document.getElementById("rename-input") as HTMLInputElement | null;
-    const renameState = prevRename
-      ? { value: prevRename.value, focused: document.activeElement === prevRename }
       : null;
     layout.innerHTML = `
       <header class="cmdbar">
         <img class="brandlogo" src="/logo.png" alt="">
         <span class="logo">OnlyHumans</span>
-        <button id="room-switch" class="roomswitch" title="rooms — switch, move, or open another window">
+        <span class="roomchip" title="${codeRoom ? "this window lives in a code room — rooms section on the left moves or adds rooms" : "this window lives in the main room — rooms section on the left moves or adds rooms"}">
           <span class="rs-glyph">${codeRoom ? "◆" : "⌂"}</span>
           <span class="rs-label">${codeRoom ? "Code room" : "Main room"}</span>
-          <span class="caret">▾</span>
-        </button>
+        </span>
         ${siteDotHtml()}
-        <button id="identity-menu" class="idmenu" title="your profile">
+        <button id="identity-menu" class="idmenu" title="your profile" aria-haspopup="menu">
           ${avatarHtml(myId, myName || "you")}
           <span class="idname">${escapeHtml(myName || "you")}</span>
-          <span class="caret">▾</span>
+          <span class="caret" aria-hidden="true">▾</span>
         </button>
       </header>
       <main>
         <div class="sidebar">
           <div class="status live-status">${statusLine()}</div>
+          <div class="side-label">rooms</div>
+          ${ready ? `
+          <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}" role="button" tabindex="0" aria-label="back to ${codeRoom ? "the code room" : "the main room"}">
+            ${MAIN_ROOM_ICON}
+            <div class="rc-body">
+              <div class="rc-name">${codeRoom ? "Code room" : "Main room"}</div>
+              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · ${codeRoom ? "same code word" : "everyone"}</div>
+            </div>
+          </div>` : `<div class="side-hint">finding the room…</div>`}
+          <div class="sideactions">
+            <button id="new-room" class="primary" title="open a second window with its own name and code word — this room stays open">+ New room</button>
+            <button id="switch-room" title="move THIS window to another room by code word (empty returns to the main room)">Switch…</button>
+          </div>
           <div class="side-label">people in the room</div>
           <ul class="member-list">
             ${ready ? `
@@ -516,16 +539,16 @@ function closeMenus() {
                 <span class="li-sub">${isHost ? "hosts the room" : "you"}</span>
               </div>
             </li>` : ""}
-            ${members.filter((m) => m.peer !== myId).map((m) => `
-              <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}">
-                ${avatarHtml(m.peer, memberLabel(m))}
-                <div class="li-body">
-                  <span class="mname">${escapeHtml(memberLabel(m))}</span>
-                  <span class="li-sub">${m.peer === hostPeer ? "hosts the room" : (connectedPeers.has(m.peer) ? "online" : "offline")}</span>
-                </div>
-                <button class="dm-btn" data-peer="${m.peer}" title="private chat with ${escapeHtml(memberLabel(m))}">⇄</button>
-                <button class="rename-btn" data-peer="${m.peer}" title="rename">✎</button>
-              </li>`).join("")}
+            ${others.map((m) => `
+            <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}">
+              ${avatarHtml(m.peer, memberLabel(m))}
+              <div class="li-body">
+                <span class="mname">${escapeHtml(memberLabel(m))}</span>
+                <span class="li-sub">${m.peer === hostPeer ? "hosts the room" : (connectedPeers.has(m.peer) ? "online" : "offline")}</span>
+              </div>
+              <button class="dm-btn" data-peer="${m.peer}" aria-label="private chat with ${escapeHtml(memberLabel(m))}" title="private chat with ${escapeHtml(memberLabel(m))}">⇄</button>
+              <button class="rename-btn" data-peer="${m.peer}" aria-label="rename ${escapeHtml(memberLabel(m))}" title="rename">✎</button>
+            </li>`).join("")}
           </ul>
           ${dms.size ? `
           <div class="side-label plabel">private chats</div>
@@ -555,7 +578,10 @@ function closeMenus() {
                      <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
                    </div>
                  </div>
-                 <button id="room-actions" class="more-btn" title="room actions">⋯</button>`
+                 <div class="tb-actions">
+                   <button id="invite-top" class="btn-ghost" title="copy a message a friend can follow to land in this room">＋ Invite</button>
+                   <button id="room-actions" class="more-btn" aria-label="room actions" title="room actions — invite, rotate key, clear, reset">⋯</button>
+                 </div>`
               : (() => {
                   const dm = dms.get(activeRoom ?? "");
                   const peer = dm?.peer ?? "";
@@ -569,7 +595,7 @@ function closeMenus() {
                 })()}
           </div>
           <div class="messages" id="msgs">
-            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${codeRoom ? (members.filter((m) => m.peer !== myId).length === 0 ? `Nobody else has used this code word yet — they land here the moment they type the same word. <button id="invite-btn" class="linklike">Invite someone</button>` : "You're in — only people who typed this room's code word can be here.") : (members.filter((m) => m.peer !== myId).length === 0 ? `You're the first here. Everyone who opens the app lands in this room — say hi, or <button id="invite-btn" class="linklike">invite a friend</button>.` : "You're in — everyone who opens the app joins this room. Say hi.")}</div>` : ""}
+            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${codeRoom ? (others.length === 0 ? `Nobody else has used this code word yet — they land here the moment they type the same word. <button id="invite-btn" class="linklike">Invite someone</button>` : "You're in — only people who typed this room's code word can be here.") : (others.length === 0 ? `You're the first here. Everyone who opens the app lands in this room — say hi, or <button id="invite-btn" class="linklike">invite a friend</button>.` : "You're in — everyone who opens the app joins this room. Say hi.")}</div>` : ""}
             ${((): string => {
               const msgs = activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? []);
               const items: Array<{ ts: number; html: string }> = msgs.map((m) => {
@@ -596,13 +622,46 @@ function closeMenus() {
             — messages wait sealed on the site and arrive when they're back (usually within a minute or two)
           </div>` : ""}
           <div class="composer">
-            <input id="send-text" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" autocomplete="off" ${ready ? "" : "disabled"}>
+            <textarea id="send-text" rows="1" placeholder="${activeRoom === room ? "message the room…" : "message privately…"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off" ${ready ? "" : "disabled"}></textarea>
             <button class="primary" id="send">Send</button>
           </div>
         </div>` : `<div class="empty">${status === "sealed"
             ? `<div class="join-progress"><span class="live-status">${statusLine()}</span></div>This room's key was rotated by its members — only the people who were inside keep access, and no one new can get in. To enter a different room, log off and use its code word.`
             : `<div class="join-progress"><span class="spin"></span><span class="live-status">${statusLine()}</span></div>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "Nobody has answered the hub yet — if no host appears within a minute, this device creates the room."}`}</div>`}
       </main>
+      ${switchModalOpen ? `
+      <div class="modal-backdrop" id="switch-backdrop">
+        <div class="modal">
+          <h3>Move this window to another room</h3>
+          <p>Type a code word and Save — this window restarts inside that
+          word's room; everyone using the same word meets there. Empty
+          returns you to the main room. This room stays open on the site's
+          side; use <b>+ New room</b> to keep this one <i>and</i> open
+          another beside it.</p>
+          <div class="modal-input">
+            <input id="switch-input" placeholder="code word (empty = main room)" maxlength="64" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="actions">
+            <button id="switch-cancel">Cancel</button>
+            <button id="switch-save" class="primary">Move there</button>
+          </div>
+        </div>
+      </div>` : ""}
+      ${renamingPeer ? `
+      <div class="modal-backdrop" id="rename-backdrop">
+        <div class="modal">
+          <h3>Name for ${escapeHtml(displayName(renamingPeer))}</h3>
+          <p>A private label — it lives only on your device and replaces
+          the id everywhere this person appears.</p>
+          <div class="modal-input">
+            <input id="rename-input" placeholder="name…" maxlength="32" spellcheck="false" autocomplete="off">
+          </div>
+          <div class="actions">
+            <button id="rename-cancel">Cancel</button>
+            <button id="rename-save" class="primary">Save name</button>
+          </div>
+        </div>
+      </div>` : ""}
       ${rotateModalOpen ? `
       <div class="modal-backdrop" id="rotate-backdrop">
         <div class="modal">
@@ -637,43 +696,31 @@ function closeMenus() {
 
     (document.getElementById("msgs") as HTMLElement | null)?.scrollTo(0, 1e9);
 
-    const sendEl = document.getElementById("send-text") as HTMLInputElement | null;
+    const sendEl = document.getElementById("send-text") as HTMLTextAreaElement | null;
     if (sendEl && sendState) {
       sendEl.value = sendState.value;
       if (sendState.focused) sendEl.focus();
-    }
-    const renameEl = document.getElementById("rename-input") as HTMLInputElement | null;
-    if (renameEl && renameState) {
-      renameEl.value = renameState.value;
-      if (renameState.focused) renameEl.focus();
+      autosize(sendEl);
     }
 
-    // ── Command bar menus ─────────────────────────────────────────
-    // Rooms: one home for every room-moving flow (open a parallel
-    // window, or move THIS window by restarting it under another code).
-    document.getElementById("room-switch")?.addEventListener("click", (e) => {
-      const el = e.currentTarget as HTMLElement;
-      if (document.getElementById("open-menu")) { closeMenus(); return; }
-      openMenu(el, [
-        { label: codeRoom ? "◆ this window · code room" : "⌂ this window · main room", header: true },
-        {
-          label: "Open another room window",
-          hint: "side by side — its own name and code",
-          act: () => void invoke("open_parallel_room").catch((err) => toast(String(err))),
-        },
-        {
-          label: "Move this window to another room…",
-          hint: "type a code word — restarts here (empty = main)",
-          act: () => {
-            if (editingCode) { document.getElementById("code-edit-input")?.focus(); return; }
-            editingCode = true;
-            render();
-          },
-        },
-      ]);
+    // ── Command bar / sidebar actions ──────────────────────────────
+    // Rooms have ONE visible home: the sidebar section. "+ New room"
+    // opens a parallel window (it asks for its own name + code at its
+    // gate); "Switch…" moves THIS window by code word.
+    document.getElementById("new-room")?.addEventListener("click", newRoom);
+    document.getElementById("switch-room")?.addEventListener("click", () => {
+      switchModalOpen = true;
+      render();
+    });
+    document.querySelector<HTMLElement>(".roomcard")?.addEventListener("click", () => {
+      if (room) { activeRoom = room; render(); }
+    });
+    document.querySelector<HTMLElement>(".roomcard")?.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter" && room) { activeRoom = room; render(); }
     });
     // Identity: the person-scoped actions live with the person.
     document.getElementById("identity-menu")?.addEventListener("click", (e) => {
+      e.stopPropagation(); // don't let the outside-click closer eat this menu
       const el = e.currentTarget as HTMLElement;
       if (document.getElementById("open-menu")) { closeMenus(); return; }
       openMenu(el, [
@@ -683,11 +730,14 @@ function closeMenus() {
           hint: "forget this name — back to the gate",
           act: () => void invoke("logoff").catch((err) => toast(String(err))),
         },
-        { label: "Enter sends · Shift+Enter newline · Esc closes", header: true },
+        { label: "Enter sends · Shift+Enter newline · Alt+N new room", header: true },
       ]);
     });
-    // Room actions: destructive/technical tools behind one overflow.
+    // Room actions: positive action visible in the titlebar; destructive
+    // and technical tools stay behind the ⋯ overflow.
+    document.getElementById("invite-top")?.addEventListener("click", () => void copyInvite());
     document.getElementById("room-actions")?.addEventListener("click", (e) => {
+      e.stopPropagation(); // don't let the outside-click closer eat this menu
       const el = e.currentTarget as HTMLElement;
       if (document.getElementById("open-menu")) { closeMenus(); return; }
       const showRoomMenu = () => {
@@ -731,46 +781,6 @@ function closeMenus() {
       };
       showRoomMenu();
     });
-    // The editor lives in the toast layer, which render() never clears —
-    // append it only once per open, or every re-render (connection and
-    // member events fire them) stacks duplicate identical editors.
-    if (editingCode && !document.getElementById("code-edit-input")) {
-      const box = ensureToasts();
-      const t = document.createElement("div");
-      t.className = "toast";
-      t.innerHTML = `<b>Change this window's room</b><div class="code-note">Type a word and Save — this window restarts inside that word's room (everyone using the same word meets there). Empty returns you to the main room. To keep this room open and open another one beside it, use “Open another room window” instead.</div>`;
-      const row = document.createElement("div");
-      row.className = "actions";
-      const input = document.createElement("input");
-      input.id = "code-edit-input";
-      input.placeholder = "code word…";
-      input.maxLength = 64;
-      const save = document.createElement("button");
-      save.className = "primary"; save.textContent = "Save";
-      const cancel = document.createElement("button");
-      cancel.textContent = "Cancel";
-      row.append(input, save, cancel);
-      t.appendChild(row);
-      box.appendChild(t);
-      input.focus();
-      const done = async () => {
-        editingCode = false;
-        try {
-          await invoke("set_passcode", { word: input.value });
-          // set_passcode restarts the app; this only runs if it errored.
-          t.remove();
-          render();
-        } catch (err) {
-          toast(String(err));
-        }
-      };
-      save.onclick = () => void done();
-      cancel.onclick = () => { editingCode = false; t.remove(); };
-      input.addEventListener("keydown", (e) => {
-        if ((e as KeyboardEvent).key === "Enter") void done();
-        if ((e as KeyboardEvent).key === "Escape") { editingCode = false; t.remove(); }
-      });
-    }
     // Open private rooms listed in the sidebar: click to switch.
     document.querySelectorAll<HTMLElement>(".sidebar li.dmrow").forEach((li) => {
       li.addEventListener("click", () => {
@@ -793,57 +803,73 @@ function closeMenus() {
     document.querySelectorAll<HTMLElement>(".rename-btn").forEach((b) => {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
-        // Drop an editor opened for a different peer (or a stray one left
-        // by an older render) so exactly one overlay exists.
-        (document.getElementById("rename-input")?.closest(".toast") as HTMLElement | null)?.remove();
         renamingPeer = b.dataset.peer ?? null;
         render();
       });
     });
-    if (renamingPeer && !document.getElementById("rename-input")) {
-      // Renaming overlay lives in the toast layer (outside #layout), which
-      // render() never clears — guard the append like the code editor.
-      const box = ensureToasts();
-      const t = document.createElement("div");
-      t.className = "toast";
-      t.innerHTML = `<b>Name for ${escapeHtml(short(renamingPeer))}</b>`;
-      const row = document.createElement("div");
-      row.className = "actions";
-      const input = document.createElement("input");
-      input.id = "rename-input";
-      input.value = contactNames.get(renamingPeer) ?? "";
-      input.placeholder = "name…";
-      const save = document.createElement("button");
-      save.className = "primary"; save.textContent = "Save";
-      const cancel = document.createElement("button");
-      cancel.textContent = "Cancel";
-      row.append(input, save, cancel);
-      t.appendChild(row);
-      box.appendChild(t);
-      input.focus();
+    // The rename modal's input opens prefilled; focus lands in it.
+    const renameInput = document.getElementById("rename-input") as HTMLInputElement | null;
+    if (renameInput && renamingPeer) {
+      renameInput.value = contactNames.get(renamingPeer) ?? "";
+      renameInput.focus();
       const done = async () => {
-        const name = input.value.trim();
+        const name = renameInput.value.trim();
         if (name && renamingPeer) {
           await invoke("add_contact", { peer: renamingPeer, name });
           contactNames.set(renamingPeer, name);
         }
         renamingPeer = null;
-        t.remove();
         render();
       };
-      save.onclick = () => void done();
-      cancel.onclick = () => { renamingPeer = null; t.remove(); };
-      input.addEventListener("keydown", (e) => {
+      document.getElementById("rename-save")?.addEventListener("click", () => void done());
+      document.getElementById("rename-cancel")?.addEventListener("click", () => { renamingPeer = null; render(); });
+      renameInput.addEventListener("keydown", (e) => {
         if ((e as KeyboardEvent).key === "Enter") void done();
-        if ((e as KeyboardEvent).key === "Escape") { renamingPeer = null; t.remove(); }
       });
     }
+    // The switch-room modal behaves like set_passcode's old overlay, but
+    // as a real modal (Enter saves, Escape closes via the global handler).
+    const switchInput = document.getElementById("switch-input") as HTMLInputElement | null;
+    if (switchInput) {
+      switchInput.value = roomCodeWord ?? "";
+      switchInput.focus();
+      switchInput.select();
+      const done = async () => {
+        switchModalOpen = false;
+        try {
+          await invoke("set_passcode", { word: switchInput.value });
+          // set_passcode restarts the app; this only runs if it errored.
+          render();
+        } catch (err) {
+          toast(String(err));
+          render();
+        }
+      };
+      document.getElementById("switch-save")?.addEventListener("click", () => void done());
+      document.getElementById("switch-cancel")?.addEventListener("click", closeSwitchModal);
+      switchInput.addEventListener("keydown", (e) => {
+        if ((e as KeyboardEvent).key === "Enter") void done();
+      });
+    }
+    document.getElementById("switch-backdrop")?.addEventListener("click", (e) => {
+      if (e.target === e.currentTarget) closeSwitchModal();
+    });
+    document.getElementById("rename-backdrop")?.addEventListener("click", (e) => {
+      if (e.target === e.currentTarget) { renamingPeer = null; render(); }
+    });
 
     document.getElementById("invite-btn")?.addEventListener("click", () => void copyInvite());
     document.getElementById("send")?.addEventListener("click", sendCurrent);
-    document.getElementById("send-text")?.addEventListener("keydown", (e) => {
-      if ((e as KeyboardEvent).key === "Enter") sendCurrent();
+    const composer = document.getElementById("send-text") as HTMLTextAreaElement | null;
+    composer?.addEventListener("keydown", (e) => {
+      const ke = e as KeyboardEvent;
+      if (ke.key === "Enter" && !ke.shiftKey) {
+        ke.preventDefault();
+        sendCurrent();
+      }
+      // Shift+Enter falls through: the textarea inserts a newline.
     });
+    composer?.addEventListener("input", () => autosize(composer));
     document.getElementById("rotate-cancel")?.addEventListener("click", closeRotateModal);
     document.getElementById("rotate-backdrop")?.addEventListener("click", (e) => {
       if (e.target === e.currentTarget) closeRotateModal();
@@ -875,12 +901,19 @@ function closeMenus() {
       render();
     });
 
+    /** Keep the composer at one line until it genuinely needs more. */
+    function autosize(el: HTMLTextAreaElement) {
+      el.style.height = "auto";
+      el.style.height = Math.min(el.scrollHeight, 132) + "px";
+    }
+
     async function sendCurrent() {
-      const input = document.getElementById("send-text") as HTMLInputElement | null;
+      const input = document.getElementById("send-text") as HTMLTextAreaElement | null;
       if (!input || !room) return;
-      const text = input.value.trim();
-      if (!text) return;
+      const text = input.value.replace(/\s+$/, "");
+      if (!text.trim()) { input.value = ""; autosize(input); return; }
       input.value = "";
+      autosize(input);
       const targets = offlineTargets();
       await invoke("send_message", { room: activeRoom ?? room, text });
       if (activeRoom !== room && activeRoom) {
