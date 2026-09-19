@@ -71,7 +71,7 @@ function renderGate(prefillCode: string | null = null) {
   layout.innerHTML = `
     <div class="gate">
       <div class="brand" style="justify-content:center">
-        <img class="brandlogo" src="/logo.png" alt="" style="width:44px;height:44px;border-radius:10px">
+        <img class="brandlogo" src="/logo.png" alt="" style="width:96px;height:96px;border-radius:22px;box-shadow:0 8px 36px rgba(23,162,184,.25)">
       </div>
       <h2>Welcome to OnlyHumans</h2>
       <p>Pick a name — the room will know you by it.</p>
