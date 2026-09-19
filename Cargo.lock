@@ -3884,7 +3884,7 @@ dependencies = [
 
 [[package]]
 name = "onlyhumans-app"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "notify-rust",
  "onlyhumans_core",
@@ -3900,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "onlyhumans_core"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "async-trait",
