@@ -3,7 +3,6 @@
 // canonical payload before storing, and records expire (TTL 300s).
 // Node-style handler + plain fetch to Upstash REST (no SDK).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { rateLimitOk } from "./_rl";
 import { createPublicKey, verify as nodeVerify } from "node:crypto";
 
 // Ed25519 verify with zero dependencies: wrap the raw 32-byte public key
@@ -116,7 +115,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(405).json({ error: "method not allowed" });
     return;
   }
-  if (!(await rateLimitOk(req, res, "reg", 30, 60))) return;
   const env = redisEnv();
   if (!env) {
     res.status(503).json({ error: "hub storage not configured" });

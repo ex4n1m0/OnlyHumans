@@ -293,8 +293,14 @@ export class Hub {
   }
 
   async mailPush(peerId: string, pubB64: string, sign: (m: Uint8Array) => Uint8Array, to: string, envelopes: Envelope[]): Promise<void> {
-    if (!envelopes.length) return;
-    const items: MailItem[] = envelopes.map((env) => {
+    await this.mailPushBatch(peerId, pubB64, sign, envelopes.map((env) => ({ to, env })));
+  }
+
+  // The hub throttles per SENDER (one push every few seconds), so every
+  // fan-out MUST ship as a single request carrying all recipients.
+  async mailPushBatch(peerId: string, pubB64: string, sign: (m: Uint8Array) => Uint8Array, batch: Array<{ to: string; env: Envelope }>): Promise<void> {
+    if (!batch.length) return;
+    const items: MailItem[] = batch.map(({ to, env }) => {
       const env_json = JSON.stringify(env);
       const ts = Date.now();
       return { to, from: peerId, public_key_b64: pubB64, env_json, ts_ms: ts, sig_b64: b64(sign(mailCanonical(peerId, to, ts, env_json))) };

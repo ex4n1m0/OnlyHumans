@@ -191,21 +191,32 @@ class Portal {
         members: [...this.members.entries()].map(([peer, name]) => ({ peer, name })),
       },
     };
-    await this.hub.mailPush(this.peerId, this.pubB64, this.sign, from, [kd]).catch(() => {});
-    await this.broadcastMembers();
+    const batch: Array<{ to: string; env: Envelope }> = [{ to: from, env: kd }];
+    const membersFrame = this.sealMembersFrame();
+    if (membersFrame) {
+      for (const p of this.members.keys()) if (p !== this.peerId) batch.push({ to: p, env: { Members: { frame: membersFrame } } });
+    }
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+  }
+
+  sealMembersFrame(): Sealed | null {
+    if (!this.room) return null;
+    this.mySeq++;
+    return this.room.seal(this.peerId, this.mySeq, KIND.members,
+      utf8(JSON.stringify({ members: [...this.members.entries()].map(([peer, name]) => ({ peer, name })) })));
   }
 
   async broadcastMembers() {
     if (!this.room || !this.isHost) return;
-    this.mySeq++;
-    const frame = this.room.seal(this.peerId, this.mySeq, KIND.members,
-      utf8(JSON.stringify({ members: [...this.members.entries()].map(([peer, name]) => ({ peer, name })) })));
+    const frame = this.sealMembersFrame();
+    if (!frame) return;
     await this.fanOut({ Members: { frame } });
   }
 
   async fanOut(env: Envelope) {
-    const targets = [...this.members.keys()].filter((p) => p !== this.peerId);
-    await Promise.all(targets.map((p) => this.hub.mailPush(this.peerId, this.pubB64, this.sign, p, [env]).catch(() => {})));
+    const batch = [...this.members.keys()].filter((p) => p !== this.peerId)
+      .map((to) => ({ to, env }));
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
   }
 
   async send(text: string) {
