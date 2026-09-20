@@ -55,6 +55,47 @@ function fmtTime(ts: number): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + time;
 }
 
+// Room-phrase generator: five words from a 256-entry list plus two
+// digits — ~47 bits of entropy behind the Argon2id stretch, strong
+// against offline dictionary scanning yet readable enough to say out
+// loud or dictate over a call.
+const GEN_WORDS = [
+  "amber", "anchor", "apple", "arrow", "atlas", "aurora", "autumn", "avian",
+  "basil", "beacon", "birch", "bishop", "bloom", "brass", "breeze", "bronze",
+  "cactus", "canyon", "cedar", "chalk", "cherry", "cinder", "cliff", "clover",
+  "cobalt", "comet", "coral", "cotton", "crane", "crater", "creek", "cypress",
+  "dahlia", "damask", "dawn", "delta", "denim", "diesel", "doodle", "dragon",
+  "dune", "eagle", "ember", "emerald", "eucalyptus", "falcon", "fable", "fennel",
+  "fern", "fjord", "flame", "flint", "forest", "fossil", "foxglove", "frost",
+  "gadget", "galaxy", "garnet", "ginger", "glacier", "glider", "granite", "grotto",
+  "harbor", "hazel", "heron", "hollow", "honey", "horizon", "ignite", "indigo",
+  "iris", "island", "ivory", "jasmine", "jasper", "jigsaw", "jungle", "juniper",
+  "kayak", "kelp", "kernel", "kestrel", "kitten", "koala", "lagoon", "lantern",
+  "lattice", "laurel", "lavender", "ledge", "lemon", "lilac", "linen", "lotus",
+  "lumber", "lunar", "lynx", "magnet", "mango", "maple", "marble", "marigold",
+  "meadow", "mercury", "midnight", "mimosa", "mineral", "mirage", "mosaic", "moss",
+  "mustard", "nebula", "nectar", "needle", "nest", "nickel", "nimbus", "noodle",
+  "north", "oasis", "oat", "obsidian", "octave", "olive", "onyx", "opal",
+  "orbit", "orchid", "osprey", "otter", "oyster", "paddle", "pancake", "papaya",
+  "parsley", "pebble", "pelican", "pepper", "petal", "pewter", "pigeon", "pigment",
+  "pine", "pistachio", "pixel", "plasma", "plume", "polar", "pollen", "pomelo",
+  "prairie", "prism", "pumpkin", "quartz", "quasar", "quill", "radish", "rainbow",
+  "raven", "ribbon", "ridge", "ripple", "river", "robin", "rocket", "rosemary",
+  "rustic", "saffron", "sage", "sailor", "salmon", "sandal", "sapphire", "scarf",
+  "sequoia", "shadow", "shale", "shrimp", "silver", "siren", "snorkel", "solar",
+  "sparrow", "spiral", "spruce", "squid", "starling", "stratus", "sugar", "sulfur",
+  "summit", "sunset", "syrup", "tagine", "tangent", "thistle", "thunder", "tiger",
+  "tinsel", "topaz", "tulip", "tundra", "turquoise", "umbra", "vanilla", "velvet",
+  "vertex", "violet", "vortex", "walnut", "wander", "wasabi", "willow", "winter",
+  "wombat", "yarrow", "yonder", "zephyr", "zinnia", "zodiac", "zombie", "zucchini",
+];
+
+function genRoomPhrase(): string {
+  const pick = () => GEN_WORDS[Math.floor(Math.random() * GEN_WORDS.length)];
+  const digits = String(10 + Math.floor(Math.random() * 90));
+  return `${pick()}-${pick()}-${pick()}-${pick()}-${pick()}-${digits}`;
+}
+
 async function main() {
   // First-run gate: the room is only joined once a username exists.
   // After a logoff the profile's room code is prefilled — the gate then
@@ -80,16 +121,21 @@ function renderGate(prefillCode: string | null = null) {
         <button class="primary" id="name-go">Enter the room</button>
       </div>
       <div class="gaterow">
-        <input id="code-input" placeholder="room code (optional)" maxlength="64" spellcheck="false" autocomplete="off">
+        <input id="code-input" placeholder="room word" maxlength="64" spellcheck="false" autocomplete="off">
+        <button id="word-dice" type="button" title="roll a strong private word" style="flex:0 0 auto;padding:.5rem .8rem;background:var(--panel,#14202a);color:inherit;border:1px solid var(--line,#1f3038);border-radius:8px;cursor:pointer">🎲</button>
       </div>
-      <p class="gatenote">Leave the code empty for the main room everyone lands in.
-      Enter a word and you'll meet only people who use the same word —
-      same code, same room.</p>
+      <div class="gaterow">
+        <button id="earth-room" type="button" title="join the public room everyone meets in" style="padding:.5rem 1rem;background:var(--teal-dim,#0c2f37);color:inherit;border:1px solid var(--teal-deep,#0d6e79);border-radius:999px;cursor:pointer">🌍 Earth — the public room</button>
+      </div>
+      <p class="gatenote">Every room is a word. <b>Earth</b> is the one
+      everyone meets in — the first person online creates it. Type or roll
+      your own word and only people who use the same word can find you;
+      the word never leaves your device.</p>
       <p class="gatehint" id="gate-err"></p>
     </div>`;
   const input = document.getElementById("name-input") as HTMLInputElement;
   const codeInput = document.getElementById("code-input") as HTMLInputElement;
-  if (prefillCode) codeInput.value = prefillCode;
+  codeInput.value = prefillCode && prefillCode.trim() ? prefillCode : "earth";
   input.focus();
   const go = async () => {
     const name = input.value.trim();
@@ -98,14 +144,25 @@ function renderGate(prefillCode: string | null = null) {
       return;
     }
     try {
-      await invoke("set_username", { name, passcode: codeInput.value });
+      await invoke("set_username", { name, passcode: codeInput.value.trim() || "earth" });
       await boot();
     } catch (e) {
       document.getElementById("gate-err")!.textContent = String(e);
     }
   };
   document.getElementById("name-go")?.addEventListener("click", () => void go());
+  document.getElementById("word-dice")?.addEventListener("click", () => {
+    codeInput.value = genRoomPhrase();
+    codeInput.focus();
+  });
+  document.getElementById("earth-room")?.addEventListener("click", () => {
+    codeInput.value = "earth";
+    input.focus();
+  });
   input.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter") void go();
+  });
+  codeInput.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") void go();
   });
 }
@@ -147,6 +204,12 @@ async function boot() {
   // in the code's room universe instead of the main room.
   const codeRoom: boolean = await invoke("has_passcode");
   let messages: ChatMessage[] = [];
+  // Since 1.1.0 every room is a word room; Earth is the public word the
+  // site names. Old wordless profiles land on Earth via the core.
+  let earthRoom = !codeRoom;
+  invoke<string | null>("passcode").then((c) => {
+    earthRoom = !codeRoom || (c ?? "").trim().toLowerCase() === "earth";
+  }).catch(() => {});
   // Quiet narration lines interleaved with messages by time (session-only).
   let narration: Array<{ ts: number; text: string }> = [];
   const narrate = (text: string) => {
@@ -166,8 +229,8 @@ async function boot() {
   let roomCodeWord: string | null = null;
   invoke<string | null>("passcode").then((c) => { roomCodeWord = c; }).catch(() => {});
   const inviteText = () => roomCodeWord
-    ? `Get OnlyHumans at onlyhumans.deepflux.space — install it, enter any name, then use the code word: ${roomCodeWord}`
-    : `Get OnlyHumans at onlyhumans.deepflux.space — install it, pick any name, and you're in the room everyone shares.`;
+    ? `Get OnlyHumans at onlyhumans.deepflux.space — install it, enter any name, then use the room word: ${roomCodeWord}`
+    : `Get OnlyHumans at onlyhumans.deepflux.space — install it, pick any name, and use the room word: earth`;
   const copyInvite = async () => {
     const t = inviteText();
     try {
@@ -346,7 +409,14 @@ async function boot() {
           if (!before.has(m.peer) && m.peer !== myId) narrate(`${memberLabel(m)} joined`);
         }
         for (const old of before) {
-          if (!after.has(old) && old !== myId) narrate(`${displayName(old)} left`);
+          if (!after.has(old) && old !== myId) {
+            narrate(`${displayName(old)} left`);
+            // Departed members still hold this epoch's room key until the
+            // host rotates it — nudge hosts so sealing becomes habit.
+            if (hostPeer === myId && members.length > 0) {
+              narrate(`they keep this room's key until it's rotated — ⋯ menu → rotate key seals the room`);
+            }
+          }
         }
         render();
         break;
@@ -506,7 +576,7 @@ function closeMenus() {
       <header class="cmdbar">
         <img class="brandlogo" src="/logo.png" alt="">
         <span class="logo">OnlyHumans</span>
-        <span class="roomchip" title="${codeRoom ? "this window lives in a code room — rooms section on the left moves or adds rooms" : "this window lives in the main room — rooms section on the left moves or adds rooms"}">
+        <span class="roomchip" title="this window lives in ${earthRoom ? "the Earth room" : "a word room"} — rooms section on the left moves or adds rooms">
           <span class="rs-glyph">${codeRoom ? "◆" : "⌂"}</span>
           <span class="rs-label">${codeRoom ? "Code room" : "Main room"}</span>
         </span>
@@ -522,16 +592,16 @@ function closeMenus() {
           <div class="status live-status">${statusLine()}</div>
           <div class="side-label">rooms</div>
           ${ready ? `
-          <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}" role="button" tabindex="0" aria-label="back to ${codeRoom ? "the code room" : "the main room"}">
+          <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}" role="button" tabindex="0" aria-label="back to ${earthRoom ? "the Earth room" : "the word room"}">
             ${MAIN_ROOM_ICON}
             <div class="rc-body">
-              <div class="rc-name">${codeRoom ? "Code room" : "Main room"}</div>
-              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · ${codeRoom ? "same code word" : "everyone"}</div>
+              <div class="rc-name">${earthRoom ? "Earth room" : "Word room"}</div>
+              <div class="rc-sub">${members.length || 1} member${(members.length || 1) === 1 ? "" : "s"} · ${earthRoom ? "the public word" : "same word"}</div>
             </div>
           </div>` : `<div class="side-hint">finding the room…</div>`}
           <div class="sideactions">
             <button id="new-room" class="primary" title="open a second window with its own name and code word — this room stays open">+ New room</button>
-            <button id="switch-room" title="move THIS window to another room by code word (empty returns to the main room)">Switch…</button>
+            <button id="switch-room" title="move THIS window to another room by word (empty takes you to Earth)">Switch…</button>
           </div>
           <div class="side-label">people in the room</div>
           <ul class="member-list">
@@ -575,10 +645,10 @@ function closeMenus() {
             ${activeRoom === room
               ? `${MAIN_ROOM_ICON}
                  <div class="tb-body">
-                   <div class="tb-title">${codeRoom ? "Code room" : "Main room"}</div>
+                   <div class="tb-title">${earthRoom ? "Earth room" : "Word room"}</div>
                    <div class="tb-sub">${statusLine()} · generation ${epoch}</div>
                    <div class="pills">
-                     <span class="pill ${codeRoom ? "amber" : ""}" title="${codeRoom ? "only people who typed this room's code word can be here" : "everyone who opens the app lands here"}">${codeRoom ? "code room" : "public"}</span>
+                     <span class="pill ${earthRoom ? "" : "amber"}" title="${earthRoom ? "everyone who uses the word earth meets here" : "only people who typed this room's word can be here"}">${earthRoom ? "public word" : "word room"}</span>
                      <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
                    </div>
                  </div>
@@ -599,7 +669,7 @@ function closeMenus() {
                 })()}
           </div>
           <div class="messages" id="msgs">
-            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${codeRoom ? (others.length === 0 ? `Nobody else has used this code word yet — they land here the moment they type the same word. <button id="invite-btn" class="linklike">Invite someone</button>` : "You're in — only people who typed this room's code word can be here.") : (others.length === 0 ? `You're the first here. Everyone who opens the app lands in this room — say hi, or <button id="invite-btn" class="linklike">invite a friend</button>.` : "You're in — everyone who opens the app joins this room. Say hi.")}</div>` : ""}
+            ${activeRoom === room && messages.length === 0 ? `<div class="chat-hint">${earthRoom ? (others.length === 0 ? `You're the first here — the first person online creates Earth, and everyone who uses the word earth lands in it. Say hi, or <button id="invite-btn" class="linklike">invite a friend</button>.` : "You're in Earth — everyone who uses this word joins this room. Say hi.") : (others.length === 0 ? `Nobody else has used this word yet — they land here the moment they type the same one. <button id="invite-btn" class="linklike">Invite someone</button>` : "You're in — only people who typed this room's word can be here.")}</div>` : ""}
             ${((): string => {
               const msgs = activeRoom === room ? messages : (dms.get(activeRoom ?? "")?.msgs ?? []);
               const items: Array<{ ts: number; html: string }> = msgs.map((m) => {
@@ -631,19 +701,19 @@ function closeMenus() {
           </div>
         </div>` : `<div class="empty">${status === "sealed"
             ? `<div class="join-progress"><span class="live-status">${statusLine()}</span></div>This room's key was rotated by its members — only the people who were inside keep access, and no one new can get in. To enter a different room, log off and use its code word.`
-            : `<div class="join-progress"><span class="spin"></span><span class="live-status">${statusLine()}</span></div>${codeRoom ? "Only people with the same code word (and this build) can find this room." : "Nobody has answered the hub yet — if no host appears within a minute, this device creates the room."}`}</div>`}
+            : `<div class="join-progress"><span class="spin"></span><span class="live-status">${statusLine()}</span></div>${earthRoom ? "Nobody is in Earth yet — if no host appears within a minute, this device creates the room." : "Only people with the same word (and this build) can find this room."}`}</div>`}
       </main>
       ${switchModalOpen ? `
       <div class="modal-backdrop" id="switch-backdrop">
         <div class="modal">
           <h3>Move this window to another room</h3>
-          <p>Type a code word and Save — this window restarts inside that
+          <p>Type a room word and Save — this window restarts inside that
           word's room; everyone using the same word meets there. Empty
-          returns you to the main room. This room stays open on the site's
-          side; use <b>+ New room</b> to keep this one <i>and</i> open
-          another beside it.</p>
+          takes you to Earth, the public room. This room stays open on the
+          site's side; use <b>+ New room</b> to keep this one <i>and</i>
+          open another beside it.</p>
           <div class="modal-input">
-            <input id="switch-input" placeholder="code word (empty = main room)" maxlength="64" spellcheck="false" autocomplete="off">
+            <input id="switch-input" placeholder="room word (empty = Earth)" maxlength="64" spellcheck="false" autocomplete="off">
           </div>
           <div class="actions">
             <button id="switch-cancel">Cancel</button>

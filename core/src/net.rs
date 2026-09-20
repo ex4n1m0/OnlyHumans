@@ -311,8 +311,18 @@ pub async fn spawn(
 
     let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(64);
 
+    // 1.1.0: every room is a word room. A blank word means Earth — the
+    // public room the site names — so there is no GK-only room anymore
+    // and a leaked/extracted GK alone never admits anyone to anything.
+    let room_word = cfg
+        .passcode
+        .as_deref()
+        .map(crate::rooms::normalize_passcode)
+        .filter(|w| !w.is_empty())
+        .unwrap_or_else(|| "earth".to_string());
+
     let mut rooms = Rooms::new(
-        crate::rooms::effective_gk(&crate::global_key(), cfg.passcode.as_deref()),
+        crate::rooms::effective_gk(&crate::global_key(), Some(room_word.as_str())),
         identity.id_string(),
         cfg.username.clone().unwrap_or_default(),
     );

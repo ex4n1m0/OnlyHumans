@@ -167,16 +167,17 @@ pub fn normalize_passcode(word: &str) -> String {
     word.trim().to_lowercase()
 }
 
-/// Effective community key for an optional passcode word.
+/// Effective community key for an optional room word.
 ///
-/// Empty/blank word -> the GK unchanged (byte-identical main-room
-/// behavior). A word mixes into the derivation, producing a parallel
-/// room universe: same word + same binary -> same room, different word
-/// -> different room, and the word itself never crosses the network
-/// (only hashes of it do). The result is stretched with a chained-hash
-/// loop to slow offline dictionary scanning of common words by other
-/// holders of the same binary; this is convenience isolation, not
-/// strong access control.
+/// Empty/blank word -> the GK unchanged. A word mixes into the
+/// derivation, producing a parallel room universe: same word + same
+/// binary -> same room, different word -> different room, and the word
+/// itself never crosses the network (only hashes of it do). Since 1.1.0
+/// the stretch is Argon2id (64 MiB, t=3, p=1) — memory-hard, so GPU/ASIC
+/// dictionary scanning pays orders of magnitude more per candidate than
+/// the old chained-SHA256 loop. Still convenience isolation rather than
+/// strong access control: pick long random words (the app generates
+/// them). The web portal mirrors these exact parameters.
 pub fn effective_gk(gk: &Key, word: Option<&str>) -> Key {
     let Some(word) = word else { return *gk };
     let word = normalize_passcode(word);
@@ -184,20 +185,18 @@ pub fn effective_gk(gk: &Key, word: Option<&str>) -> Key {
         return *gk;
     }
     let mut h = Sha256::new();
-    h.update(b"OH1-pass-v1|");
+    h.update(b"OH1-pass-v2|");
     h.update(gk);
     h.update(word.as_bytes());
-    let mut k = Key::default();
-    k.copy_from_slice(&h.finalize());
-    // Stretch once per derivation (~tens of ms release): a scanner must
-    // pay the same chain for every candidate word.
-    for _ in 0..65_536 {
-        let mut h = Sha256::new();
-        h.update(b"OH1-pass-x|");
-        h.update(k);
-        k.copy_from_slice(&h.finalize());
-    }
-    k
+    let salt = h.finalize();
+    let params =
+        argon2::Params::new(65_536, 3, 1, Some(32)).expect("valid Argon2id parameters");
+    let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
+    let mut out = Key::default();
+    argon
+        .hash_password_into(word.as_bytes(), &salt, &mut out)
+        .expect("argon2 derives 32 bytes");
+    out
 }
 
 #[derive(Serialize, Deserialize)]
