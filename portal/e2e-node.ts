@@ -18,7 +18,7 @@ const pubB64 = b64(publicKeyProtobuf(pub));
 const sign = (m: Uint8Array) => ed25519.sign(m, seed);
 const hub = new Hub(BASE);
 
-const gk = unb64((await (await fetch(`${BASE}/gk.json`, { cache: "no-store" })).json()).gk_b64);
+const gk = unb64((await (await fetch(`${BASE}/api/gk`, { cache: "no-store" })).json()).gk_b64);
 const egk = await effectiveGk(gk, word);
 const roomHex = globalRoomHex(egk);
 

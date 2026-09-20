@@ -1,3 +1,16 @@
 node_modules/
 .vercel/
 .env*
+
+# The production GK for this deployment ships in gk.json — written per
+# release by tools/deploy-release.sh on the release machine. A public
+# checkout carries no key material: independent builders get their own
+# universe via the app's per-clone random key (core/build.rs).
+gk.json
+
+# Release artifacts and dev/working files never belong in git. (download/
+# stays tracked: the git-pushed tree serves the installers.)
+.e2e.mjs
+.kat-test.mjs
+.zcodeignore
+.zcode/

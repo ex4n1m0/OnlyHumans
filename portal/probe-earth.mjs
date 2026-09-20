@@ -6,7 +6,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 const BASE = "https://onlyhumans.deepflux.space";
 const word = process.argv[3] ?? "earth";
 
-const gkB64 = (await (await fetch(`${BASE}/gk.json`, { cache: "no-store" })).json()).gk_b64;
+const gkB64 = (await (await fetch(`${BASE}/api/gk`, { cache: "no-store" })).json()).gk_b64;
 const gk = new Uint8Array(Buffer.from(gkB64, "base64url"));
 
 const salt = sha256(new Uint8Array(Buffer.concat([Buffer.from("OH1-pass-v2|"), gk, Buffer.from(word)])));

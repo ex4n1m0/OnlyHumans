@@ -306,11 +306,20 @@ export class Hub {
         const ts = Date.now();
         return { to, from: peerId, public_key_b64: pubB64, env_json, ts_ms: ts, sig_b64: b64(sign(mailCanonical(peerId, to, ts, env_json))) };
       });
-      const r = await fetch(`${this.base}/api/inbox`, {
+      const send = () => fetch(`${this.base}/api/inbox`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ items }),
       });
+      let r = await send();
+      // A 429 is the per-sender throttle window, not a failure. The desktop
+      // app rides it out on its next tick; a tab has no tick, so wait one
+      // window out and try this chunk once more instead of dropping mail
+      // the composer already echoed locally.
+      if (r.status === 429) {
+        await new Promise((ok) => setTimeout(ok, 4200));
+        r = await send();
+      }
       if (!r.ok) throw new Error(`mail push failed: ${r.status}`);
     }
   }

@@ -59,22 +59,64 @@ class Portal {
     this.pubB64 = b64(publicKeyProtobuf(ed25519.getPublicKey(this.seed)));
   }
 
+  /// The universe key is fetched once per tab from /api/gk (a function
+  /// backed by a Vercel env var, so no key file ever lives in the repo),
+  /// kicked off at page load so the round-trip hides behind the user's
+  /// typing; join() awaits the same promise instead of a fresh fetch.
+  gkPromise: Promise<void> | null = null;
+
+  fetchGk(): Promise<void> {
+    this.gkPromise = (async () => {
+      const gkRes = await fetch("/api/gk", { cache: "no-cache" });
+      if (!gkRes.ok) throw new Error("portal not enabled for this app version yet");
+      const gkJ = await gkRes.json();
+      this.gk = unb64(gkJ.gk_b64);
+    })();
+    return this.gkPromise;
+  }
+
+  /// Argon2id stretches are memoized per word: re-joining the same word
+  /// and the idle warm-up for the pre-filled "earth" reuse the burn.
+  stretchCache = new Map<string, Promise<Uint8Array>>();
+
+  stretch(word: string): Promise<Uint8Array> {
+    let p = this.stretchCache.get(word);
+    if (!p) {
+      p = effectiveGk(this.gk, word);
+      p.catch(() => this.stretchCache.delete(word));
+      this.stretchCache.set(word, p);
+    }
+    return p;
+  }
+
+  /// Everything that needs no user input: identity from localStorage, the
+  /// GK fetch, and — idle permitting — the earth stretch. Removes most of
+  /// the wait from the common join path.
+  prefetch() {
+    this.identity();
+    void this.fetchGk();
+    const warm = () => { if (this.gk) void this.stretch("earth"); };
+    if ("requestIdleCallback" in window) requestIdleCallback(warm, { timeout: 4000 });
+    else setTimeout(warm, 300);
+  }
+
   async join(name: string, word: string) {
     this.name = name;
     this.word = word;
     this.identity();
     setStatus("fetching the room base…");
-    const gkRes = await fetch("/gk.json", { cache: "no-cache" });
-    if (!gkRes.ok) throw new Error("portal not enabled for this app version yet");
-    const gkJ = await gkRes.json();
-    this.gk = unb64(gkJ.gk_b64);
+    await (this.gkPromise ?? this.fetchGk());
     setStatus("deriving the room from your word…");
-    this.egk = await effectiveGk(this.gk, word);
+    this.egk = await this.stretch(word);
     this.roomHex = globalRoomHex(this.egk);
     setStatus("registering with the site…");
-    await this.hub.reg(this.peerId, this.pubB64, this.sign);
+    // Publishing our address and reading the room pointer are independent —
+    // ship them as one round-trip instead of two sequential awaits.
+    const [, rec] = await Promise.all([
+      this.hub.reg(this.peerId, this.pubB64, this.sign),
+      this.hub.lookupRoom(this.roomHex),
+    ]);
     void this.beat();
-    const rec = await this.hub.lookupRoom(this.roomHex);
     if (rec && rec.host_peer_id === this.peerId) {
       // Our own record survived a page refresh (key was memory-only and is
       // gone): re-claim it and mint a fresh room — members converge back
@@ -146,7 +188,13 @@ class Portal {
   }
 
   loop() {
-    setInterval(() => void this.drain(), 3500);
+    // First poll right away — a seat delivery used to wait out the whole
+    // first tick — and poll faster while we still hold no room key.
+    void this.drain();
+    const drainTick = () => {
+      void this.drain().catch(() => {}).then(() => setTimeout(drainTick, this.room ? 3500 : 2000));
+    };
+    setTimeout(drainTick, this.room ? 3500 : 2000);
     setInterval(() => {
       void this.hub.reg(this.peerId, this.pubB64, this.sign).catch(() => {});
       void this.beat();
@@ -193,7 +241,7 @@ class Portal {
           this.isHost = true; // keep our RoomCrypto: same key, same epoch
           this.hostId = this.peerId;
           this.status = "";
-          this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· the host left — you are hosting now", out: false });
+          this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· the host left — this tab keeps the room open", out: false });
         }
       } catch { /* retry next cycle */ }
       return;
@@ -393,11 +441,7 @@ const isEarth = () => portal.word.trim().toLowerCase() === "earth";
 const roomName = () => (isEarth() ? "Earth room" : "Word room");
 
 function statusLine(): string {
-  if (portal.isHost) return "you host the room";
-  if (portal.room) {
-    const hostName = portal.members.get(portal.hostId);
-    return hostName ? `connected · ${hostName} hosts` : "connected";
-  }
+  if (portal.room) return "connected";
   return portal.status || "finding the room…";
 }
 
@@ -501,7 +545,7 @@ function render() {
     root.innerHTML = `
       <div class="gate">
         <div class="gate-inner">
-          <img class="gate-logo" src="/logo.png" alt="">
+          <img class="gate-logo" src="/icon-256.png" alt="">
           <h2>Join a room from your browser</h2>
           <p>Same sealed rooms as the desktop app — no install, no account.</p>
           <div class="gaterow">
@@ -550,7 +594,7 @@ function render() {
   const memberCount = portal.members.size || 1;
   root.innerHTML = `
     <header class="cmdbar">
-      <img class="brandlogo" src="/logo.png" alt="">
+      <img class="brandlogo" src="/icon-256.png" alt="">
       <span class="logo">OnlyHumans</span>
       <span class="roomchip" title="this tab lives in ${isEarth() ? "the Earth room" : "a word room"} — the desktop app keeps history">
         <span class="rs-glyph">${isEarth() ? "⌂" : "◆"}</span>
@@ -566,7 +610,7 @@ function render() {
     <main>
       <div class="sidebar">
         <div class="status">${esc(portal.status || statusLine())}</div>
-        <div class="side-label">rooms</div>
+        <div class="side-label">this room</div>
         <div class="roomcard" title="${esc(portal.word)}">
           ${MAIN_ROOM_ICON}
           <div class="rc-body">
@@ -576,19 +620,19 @@ function render() {
         </div>
         <div class="side-label">people in the room</div>
         <ul class="member-list">
-          <li class="${portal.isHost ? "ishost" : ""}" title="this is you">
+          <li title="this is you">
             ${avatarHtml(myId, portal.name)}
             <div class="li-body">
               <span class="mname">${esc(portal.name)} (you)</span>
-              <span class="li-sub">${portal.isHost ? "hosts the room" : "you"}</span>
+              <span class="li-sub">you</span>
             </div>
           </li>
           ${others.map(([peer, name]) => `
-          <li class="${peer === portal.hostId ? "ishost" : ""}">
+          <li>
             ${avatarHtml(peer, name)}
             <div class="li-body">
               <span class="mname">${esc(name)}</span>
-              <span class="li-sub">${peer === portal.hostId ? "hosts the room" : "via site"}</span>
+              <span class="li-sub">via site</span>
             </div>
           </li>`).join("")}
         </ul>
@@ -706,4 +750,5 @@ async function doJoin() {
 
 const saved = localStorage.getItem("oh-portal-name");
 render();
+portal.prefetch();
 if (saved) { const n = $("p-name") as HTMLInputElement | null; if (n) n.value = saved; }

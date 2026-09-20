@@ -10,3 +10,5 @@
 .vercel/
 node_modules/
 portal/
+# README-only assets (referenced from GitHub, not from any served page).
+screenshots/
