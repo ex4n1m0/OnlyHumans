@@ -126,6 +126,11 @@ pub struct Rooms {
     room_hex: String,
     room: Option<RoomState>,
     dms: HashMap<String, DmRoom>,
+    /// The host we last sent a Join to. A FIRST KeyDelivery is only
+    /// accepted from this peer: the GK (public for the earth room) lets
+    /// anyone seal a key, so an unrestricted handler would let a stranger
+    /// hand us their own room key and hijack the session.
+    expect_host: Option<PeerId>,
     /// Our join was refused because the room is sealed (rotated under a
     /// key we never held). Session latch: stops the join retry loop and
     /// tells the UI the door is closed.
@@ -208,7 +213,13 @@ impl Rooms {
     pub fn new(gk: Key, my_id: String, my_name: String) -> Self {
         let my_name = sanitize_name(&my_name);
         let room_hex = global_room_hex(&gk);
-        Self { gk, my_id, my_name, room_hex, room: None, dms: HashMap::new(), sealed: false }
+        Self { gk, my_id, my_name, room_hex, room: None, dms: HashMap::new(), expect_host: None, sealed: false }
+    }
+
+    /// Record the host a Join envelope is being sent to (gates the first
+    /// KeyDelivery we accept).
+    pub fn set_join_target(&mut self, host: &PeerId) {
+        self.expect_host = Some(*host);
     }
 
     pub fn my_id(&self) -> &str {
@@ -313,6 +324,7 @@ impl Rooms {
     /// host-record race before anyone joined us).
     pub fn reset(&mut self) {
         self.room = None;
+        self.expect_host = None;
     }
 
     /// Open (or re-open) a private room with `peer`. Returns the room hex
@@ -491,6 +503,23 @@ impl Rooms {
                     out.push(err("key delivery for unknown room"));
                     return out;
                 }
+                // Only the host we deliberately contacted may seat or
+                // re-key us. Seated: our recorded host. First delivery:
+                // the peer we mailed our Join to. Anything else (a GK
+                // holder racing the real host) is ignored.
+                if let Some(st) = self.room.as_ref() {
+                    if st.has_key && st.host != from {
+                        out.push(err("key delivery from a peer that is not our host"));
+                        return out;
+                    }
+                } else if self.expect_host != Some(from) {
+                    out.push(err("key delivery from an unexpected host"));
+                    return out;
+                }
+                if epoch < 1 {
+                    out.push(err("key delivery with invalid epoch"));
+                    return out;
+                }
                 let ct = match crypto::base64_decode(&key_ct_b64) {
                     Ok(c) => c,
                     Err(_) => {
@@ -516,12 +545,18 @@ impl Rooms {
                         return out;
                     }
                 };
-                // Re-delivery after a re-join: keep our state (replay
-                // guard) but still apply the fresh member list.
+                // Re-delivery to a seated member: the host is
+                // authoritative — adopt a newer epoch or a changed key
+                // (missed rotation, takeover fork) and always apply the
+                // fresh member list; never regress.
                 if let Some(st) = self.room.as_mut() {
                     if st.has_key {
-                        let list = sanitize_members(members, &self.my_id);
-                        st.members = list;
+                        let current_key = *st.crypto.room_key();
+                        if epoch > st.crypto.epoch || key != current_key {
+                            st.crypto = RoomCrypto::from_delivered(room_id, key);
+                            st.crypto.epoch = epoch.max(1);
+                        }
+                        st.members = sanitize_members(members, &self.my_id);
                         out.push(RoomEvent::MembersChanged {
                             room_id_hex: room_id_hex.clone(),
                             members: self.members(),
@@ -993,6 +1028,133 @@ mod seal_tests {
         assert!(sent_error(&events).is_none(), "member re-join must not be refused");
         assert_eq!(delivered_key(&events), Some(2), "member gets the current key");
         let _ = hpid;
+    }
+
+    #[test]
+    fn stranger_cannot_seat_a_fresh_guest() {
+        // A first KeyDelivery is only accepted from the host we mailed our
+        // Join to — anyone holding the GK (public for earth) could
+        // otherwise hand us their own key and hijack the session.
+        let (mut host, _hpid) = node("host");
+        let (mut guest, gpid) = node("guest");
+        let (stranger, spid) = node("stranger");
+
+        host.become_host(None, 1);
+        guest.set_join_target(&host_id(&host));
+
+        // The stranger races the real host with their own (validly
+        // GK-sealed) delivery.
+        let key = [9u8; 32];
+        let ct = crypto::seal_room_key(
+            &host.gk,
+            &hex::decode(host.room_hex()).unwrap().try_into().unwrap(),
+            &guest.my_id().to_string(),
+            &key,
+        );
+        let poison = Envelope::KeyDelivery {
+            room_id_hex: host.room_hex().to_string(),
+            epoch: 1,
+            key_ct_b64: crypto::base64_encode(&ct),
+            members: vec![MemberInfo { peer: stranger.my_id().to_string(), name: "evil".into() }],
+        };
+        let events = guest.handle(spid, poison);
+        assert!(guest.state().is_none(), "stranger delivery must not install a room");
+        assert!(events.iter().any(|ev| matches!(ev, RoomEvent::ProtocolError { .. })));
+
+        // The REAL host's delivery still seats us.
+        let events = host.handle(gpid, guest.join_envelope());
+        let delivery = events
+            .iter()
+            .find_map(|ev| match ev {
+                RoomEvent::Send { peer, envelope: env @ Envelope::KeyDelivery { .. } } => Some((*peer, env.clone())),
+                _ => None,
+            })
+            .expect("host must deliver the key");
+        assert_eq!(delivery.0, gpid);
+        let events = guest.handle(host_id(&host), delivery.1);
+        assert!(matches!(events.first(), Some(RoomEvent::RoomReady { .. })));
+        assert!(guest.state().is_some());
+    }
+
+    #[test]
+    fn seated_guest_ignores_non_host_rekey_and_members() {
+        let (mut host, _hpid) = node("host");
+        let (mut guest, gpid) = node("guest");
+        let (stranger, spid) = node("stranger");
+        host.become_host(None, 1);
+
+        // Seat the guest via the host's real delivery.
+        guest.set_join_target(&host_id(&host));
+        let events = host.handle(gpid, guest.join_envelope());
+        let delivery = events
+            .iter()
+            .find_map(|ev| match ev {
+                RoomEvent::Send { envelope: env @ Envelope::KeyDelivery { .. }, .. } => Some(env.clone()),
+                _ => None,
+            })
+            .unwrap();
+        guest.handle(host_id(&host), delivery);
+
+        let members_before = guest.members();
+        let epoch_before = guest.state().unwrap().crypto.epoch;
+
+        // A non-host GK holder tries to re-key us and poison the list.
+        let key = [9u8; 32];
+        let ct = crypto::seal_room_key(
+            &host.gk,
+            &hex::decode(host.room_hex()).unwrap().try_into().unwrap(),
+            &guest.my_id().to_string(),
+            &key,
+        );
+        let poison = Envelope::KeyDelivery {
+            room_id_hex: host.room_hex().to_string(),
+            epoch: 5,
+            key_ct_b64: crypto::base64_encode(&ct),
+            members: vec![MemberInfo { peer: stranger.my_id().to_string(), name: "evil".into() }],
+        };
+        guest.handle(spid, poison);
+        assert_eq!(guest.members(), members_before, "non-host must not change members");
+        assert_eq!(guest.state().unwrap().crypto.epoch, epoch_before);
+    }
+
+    #[test]
+    fn guest_adopts_host_rekey_on_redelivery() {
+        // Missed rotation: the guest re-joins and the host re-delivers the
+        // CURRENT key/epoch — the guest must adopt it, not keep the stale
+        // key forever.
+        let (mut host, _hpid) = node("host");
+        let (mut guest, gpid) = node("guest");
+        host.become_host(None, 1);
+
+        guest.set_join_target(&host_id(&host));
+        let events = host.handle(gpid, guest.join_envelope());
+        let delivery = events
+            .iter()
+            .find_map(|ev| match ev {
+                RoomEvent::Send { envelope: env @ Envelope::KeyDelivery { .. }, .. } => Some(env.clone()),
+                _ => None,
+            })
+            .unwrap();
+        guest.handle(host_id(&host), delivery);
+        assert_eq!(guest.state().unwrap().crypto.epoch, 1);
+
+        assert!(host.rotate().is_some()); // epoch 2, new key
+
+        // Re-join from the (still listed) guest -> host re-delivers epoch 2.
+        let events = host.handle(gpid, guest.join_envelope());
+        let redelivery = events
+            .iter()
+            .find_map(|ev| match ev {
+                RoomEvent::Send { envelope: env @ Envelope::KeyDelivery { .. }, .. } => Some(env.clone()),
+                _ => None,
+            })
+            .unwrap();
+        guest.set_join_target(&host_id(&host));
+        guest.handle(host_id(&host), redelivery);
+
+        let st = guest.state().unwrap();
+        assert_eq!(st.crypto.epoch, 2, "guest must adopt the rotated epoch");
+        assert_eq!(st.crypto.room_key(), host.state().unwrap().crypto.room_key());
     }
 
     fn host_id(host: &Rooms) -> PeerId {

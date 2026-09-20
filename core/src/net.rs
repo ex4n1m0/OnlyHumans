@@ -202,6 +202,12 @@ pub struct NodeConfig {
     /// parallel room universe from (GK, word) instead of joining the
     /// main room. Same word + same binary -> same room.
     pub passcode: Option<String>,
+    /// Mailbox-only member (what the web portal is): register with NO
+    /// direct addresses and deliver exclusively through the site
+    /// mailbox. Hosts still hold the room record; joiners reach them by
+    /// mailing the Join. Also lets the live interop test stand in for a
+    /// browser tab.
+    pub mailbox_only: bool,
     /// Public address (IP or DNS name) to publish FIRST for port-forwarded
     /// hosts — the one address peers behind other NATs can dial.
     pub public_addr: Option<String>,
@@ -225,6 +231,7 @@ impl Default for NodeConfig {
             room_host: None,
             username: None,
             passcode: None,
+            mailbox_only: false,
             public_addr: None,
             presence_token: {
                 use rand::RngCore;
@@ -364,6 +371,16 @@ pub async fn spawn(
 
     // Automatic join orchestration.
     let mut join_target: Option<PeerId> = None;
+    // Host we last queued a Join envelope for, and when. The fresh-guest
+    // path must also MAIL Joins (a mailbox-only host such as the web
+    // portal publishes no addresses and can never be dialed) — the latch
+    // keeps the 5 s tick from queueing one on every pass.
+    let mut join_mail: Option<(PeerId, std::time::Instant)> = None;
+    // When the room-sealed latch flipped (re-arms discovery after 5 min:
+    // sealed rooms die with their hosts and get re-founded).
+    let mut sealed_since: Option<std::time::Instant> = None;
+    // Ready-guest record check: (last check, consecutive empty lookups).
+    let mut guest_check: Option<(std::time::Instant, u32)> = None;
     let mut host_record_ok = false;
     let mut grace_left: Option<u32> = if cfg.assume_host { Some(0) } else { Some(12) };
     let mut announced = false;
@@ -378,6 +395,13 @@ pub async fn spawn(
     let mut hub_interval = tokio::time::interval(Duration::from_secs(120));
     hub_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut hub_registered = false;
+    // Mailbox drain rides its own, faster cadence: a mailbox-only peer
+    // (the web portal) can only answer through the site, so app↔web
+    // visibility is bounded by how often we drain — 30 s, independent of
+    // the 120 s registration cycle. Drains are signed GETs of an usually
+    // empty inbox; the hub rate-limits pushes, not drains.
+    let mut mail_interval = tokio::time::interval(Duration::from_secs(30));
+    mail_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut room_tick = tokio::time::interval(Duration::from_secs(5));
     // Presence beacon token from the config (shell-owned so exit cleanup
     // can't race this task): random per app start, never derived from the
@@ -410,6 +434,9 @@ pub async fn spawn(
                         host_record_ok = false;
                         grace_left = None;
                         join_target = None;
+                        join_mail = None;
+                        sealed_since = None;
+                        guest_check = None;
                         let _ = event_tx.send(NodeEvent::JoinStatus { status: "connecting".into() });
                         let _ = event_tx.send(NodeEvent::Log {
                             message: "room state reset — rediscovering the room".into(),
@@ -432,14 +459,17 @@ pub async fn spawn(
                     ).await;
                 }
                 _ = hub_fast.tick(), if !cfg.offline && !hub_registered => {
-                    match register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), &mut observed_ip).await {
+                    match register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), cfg.mailbox_only, &mut observed_ip).await {
                         Ok(()) => {
                             hub_registered = true;
                             // The slow interval's immediate first tick would
                             // re-register within the hub's 30s per-peer
                             // rate limit; reset pushes the next refresh a
-                            // full period out.
+                            // full period out. The mail interval resets
+                            // alongside so its own immediate first tick
+                            // doesn't fire a redundant drain.
                             hub_interval.reset();
+                            mail_interval.reset();
                             beat_presence(&hub, &presence_token, &event_tx).await;
                             // Fresh start: pick up anything that queued
                             // for us while we were away.
@@ -452,11 +482,10 @@ pub async fn spawn(
                 }
                 _ = hub_interval.tick(), if !cfg.offline && hub_registered => {
                     tracing::debug!("tick: hub interval (register + presence + record refresh)");
-                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), &mut observed_ip).await {
+                    if let Err(e) = register_with_hub(&mut swarm, &identity, &hub, &circuit_addrs, cfg.public_addr.as_deref(), cfg.mailbox_only, &mut observed_ip).await {
                         let _ = event_tx.send(NodeEvent::Log { message: format!("hub register: {e}") });
                     }
                     beat_presence(&hub, &presence_token, &event_tx).await;
-                    drain_mailbox(&mut swarm, &mut rooms, &store, &mut outbox, &mut inflight, &identity, &hub, &event_tx).await;
                     // Hosts refresh their room record alongside addresses
                     // so the election pointer never silently expires while
                     // they are alive.
@@ -478,6 +507,7 @@ pub async fn spawn(
                             host_record_ok = false;
                             grace_left = None;
                             join_target = None;
+                            join_mail = None;
                             let _ = event_tx.send(NodeEvent::Log {
                                 message: "another live host holds the room record — yielding, rejoining".into(),
                             });
@@ -485,6 +515,11 @@ pub async fn spawn(
                             let _ = event_tx.send(NodeEvent::Log { message: format!("room record: {e}") });
                         }
                     }
+                }
+                _ = mail_interval.tick(), if !cfg.offline && hub_registered => {
+                    // The dedicated drain cadence (see mail_interval above):
+                    // mailbox-only peers answer only through the site.
+                    drain_mailbox(&mut swarm, &mut rooms, &store, &mut outbox, &mut inflight, &identity, &hub, &event_tx).await;
                 }
                 _ = room_tick.tick() => {
                     tracing::debug!("tick: room orchestration");
@@ -496,6 +531,9 @@ pub async fn spawn(
                         &cfg,
                         &room_hex,
                         &mut join_target,
+                        &mut join_mail,
+                        &mut sealed_since,
+                        &mut guest_check,
                         &mut host_record_ok,
                         &mut grace_left,
                         &mut announced,
@@ -511,47 +549,78 @@ pub async fn spawn(
                     // instead — sealed envelopes wait there until its
                     // next drain, so delivery no longer depends on both
                     // sides being simultaneously reachable.
-                    for peer in outbox.keys().copied().collect::<Vec<_>>() {
-                        if !swarm.is_connected(&peer) {
-                            dial_peer(&mut swarm, &hub, &identity, peer, &cfg, &mut event_tx).await;
+                    //
+                    // All due peers ship as ONE batched push per tick
+                    // (mixed recipients, capped at the hub's 16-item
+                    // limit): the hub throttles per SENDER to one push
+                    // every 4 s, so per-peer requests would 429 each
+                    // other, and a >16-item queue could never drain.
+                    // Leftovers stay queued for the next tick.
+                    if !cfg.offline {
+                        let mut batch: Vec<(PeerId, Envelope)> = Vec::new();
+                        for peer in outbox.keys().copied().collect::<Vec<_>>() {
+                            if batch.len() >= 16 {
+                                break;
+                            }
                             if !swarm.is_connected(&peer) {
-                                let waited = mail_wait.entry(peer).or_insert(0);
-                                *waited += 1;
-                                if *waited >= 2 {
-                                    let n = outbox.get(&peer).map(|q| q.len()).unwrap_or(0);
-                                    if n > 0 {
-                                        let envs: Vec<Envelope> =
-                                            outbox.get_mut(&peer).map(|q| q.drain(..).collect()).unwrap_or_default();
-                                        match hub.mail_push(&identity, &peer.to_string(), &envs).await {
-                                            Ok(()) => {
-                                                mail_wait.remove(&peer);
-                                                let _ = event_tx.send(NodeEvent::Log {
-                                                    message: format!(
-                                                        "mailbox: {n} sealed envelope(s) queued via site for {}",
-                                                        &peer.to_string()[..12.min(peer.to_string().len())]
-                                                    ),
-                                                });
-                                            }
-                                            Err(e) => {
-                                                // Keep the envelopes queued; retry next tick.
-                                                let q = outbox.entry(peer).or_default();
-                                                for env in envs {
-                                                    q.push_back(env);
-                                                }
-                                                let _ = event_tx.send(NodeEvent::Log {
-                                                    message: format!("mailbox push: {e}"),
-                                                });
+                                dial_peer(&mut swarm, &hub, &identity, peer, &cfg, &mut event_tx).await;
+                                if !swarm.is_connected(&peer) {
+                                    let waited = mail_wait.entry(peer).or_insert(0);
+                                    *waited += 1;
+                                    if *waited >= 2 {
+                                        while batch.len() < 16 {
+                                            match outbox.get_mut(&peer) {
+                                                Some(q) => match q.pop_front() {
+                                                    Some(env) => batch.push((peer, env)),
+                                                    None => break,
+                                                },
+                                                None => break,
                                             }
                                         }
-                                    } else {
-                                        mail_wait.remove(&peer);
                                     }
+                                } else {
+                                    mail_wait.remove(&peer);
                                 }
                             } else {
                                 mail_wait.remove(&peer);
                             }
-                        } else {
-                            mail_wait.remove(&peer);
+                        }
+                        if !batch.is_empty() {
+                            let n = batch.len();
+                            let peers_n = batch
+                                .iter()
+                                .map(|(p, _)| *p)
+                                .collect::<std::collections::HashSet<_>>()
+                                .len();
+                            let items: Vec<(String, Envelope)> =
+                                batch.iter().map(|(p, e)| (p.to_string(), e.clone())).collect();
+                            match hub.mail_push_many(&identity, &items).await {
+                                Ok(()) => {
+                                    let pushed: std::collections::HashSet<PeerId> =
+                                        batch.iter().map(|(p, _)| *p).collect();
+                                    for peer in pushed {
+                                        let empty =
+                                            outbox.get(&peer).map_or(true, |q| q.is_empty());
+                                        if empty {
+                                            mail_wait.remove(&peer);
+                                        }
+                                    }
+                                    let _ = event_tx.send(NodeEvent::Log {
+                                        message: format!(
+                                            "mailbox: {n} sealed envelope(s) queued via site for {peers_n} peer(s)"
+                                        ),
+                                    });
+                                }
+                                Err(e) => {
+                                    // Keep the envelopes queued; retry next tick.
+                                    for (peer, env) in batch {
+                                        enqueue(&mut outbox, peer, env);
+                                    }
+                                    let _ = event_tx.send(NodeEvent::Log {
+                                        message: format!("mailbox push: {e}"),
+                                    });
+                                }
+                            }
                         }
                     }
                 }
@@ -719,6 +788,7 @@ async fn register_with_hub(
     hub: &HubClient,
     circuit_addrs: &[Multiaddr],
     public_addr: Option<&str>,
+    mailbox_only: bool,
     observed_ip: &mut Option<std::net::Ipv4Addr>,
 ) -> anyhow::Result<()> {
     let my_ip = default_route_ip();
@@ -802,7 +872,7 @@ async fn register_with_hub(
             push(&mut addrs, &mut seen, Multiaddr::empty().with(Protocol::from(ip)).with(Protocol::Tcp(p)));
         }
     }
-    if addrs.is_empty() {
+    if addrs.is_empty() && !mailbox_only {
         anyhow::bail!("no listening addresses yet");
     }
     let observed = hub.register(identity, addrs).await?;
@@ -999,6 +1069,9 @@ async fn room_orchestration(
     cfg: &NodeConfig,
     room_hex: &str,
     join_target: &mut Option<PeerId>,
+    join_mail: &mut Option<(PeerId, std::time::Instant)>,
+    sealed_since: &mut Option<std::time::Instant>,
+    guest_check: &mut Option<(std::time::Instant, u32)>,
     host_record_ok: &mut bool,
     grace_left: &mut Option<u32>,
     announced: &mut bool,
@@ -1019,6 +1092,7 @@ async fn room_orchestration(
                 if let Ok(Some(rec)) = hub.lookup_room(room_hex).await {
                     if rec.host_peer_id != identity.peer_id().to_string() {
                         rooms.reset();
+                        *join_mail = None;
                         let _ = store.lock().unwrap().clear_conversation(room_hex);
                         let _ = event_tx.send(NodeEvent::Log {
                             message: "another live host holds the room record — yielding, rejoining".into(),
@@ -1048,8 +1122,59 @@ async fn room_orchestration(
             // rotation is healed.
             if !rooms.is_host() {
                 let host = st.host;
+                rooms.set_join_target(&host);
                 enqueue(outbox, host, rooms.join_envelope());
                 flush_outbox(swarm, outbox, inflight, host);
+            }
+        }
+        // A seated guest never re-enters the join flow below — but its
+        // host can die or lose the record to a successor. Periodically
+        // verify the record still names OUR host; if it names another
+        // live host (takeover/fork) or has been gone for two consecutive
+        // checks, drop our state and rejoin through normal discovery so
+        // we adopt the live room instead of stranding in a dead one.
+        // (One empty lookup alone can be a lapse window; two a minute
+        // apart means the host is really gone.)
+        if !rooms.is_host() && !cfg.offline {
+            let due = guest_check.map_or(true, |(at, _)| at.elapsed() >= Duration::from_secs(60));
+            if due {
+                *guest_check = Some((std::time::Instant::now(), guest_check.map_or(0, |(_, m)| m)));
+                let st_host = rooms.state().expect("ready implies state").host;
+                let mut rejoin = false;
+                match hub.lookup_room(room_hex).await {
+                    Ok(Some(rec)) => {
+                        if matches!(PeerId::from_str(&rec.host_peer_id), Ok(h) if h == st_host) {
+                            if let Some((_, missing)) = guest_check.as_mut() {
+                                *missing = 0;
+                            }
+                        } else {
+                            rejoin = true;
+                        }
+                    }
+                    Ok(None) => {
+                        if let Some((_, missing)) = guest_check.as_mut() {
+                            *missing += 1;
+                            rejoin = *missing >= 2;
+                        }
+                    }
+                    Err(_) => {} // transient hub error: check again next cycle
+                }
+                if rejoin {
+                    if let Some((_, missing)) = guest_check.as_mut() {
+                        *missing = 0;
+                    }
+                    rooms.reset();
+                    let _ = store.lock().unwrap().clear_conversation(room_hex);
+                    *announced = false;
+                    *host_record_ok = false;
+                    *grace_left = None;
+                    *join_target = None;
+                    *join_mail = None;
+                    let _ = event_tx.send(NodeEvent::Log {
+                        message: "the room record moved on — rejoining through discovery".into(),
+                    });
+                    return;
+                }
             }
         }
         if !cfg.offline {
@@ -1071,6 +1196,7 @@ async fn room_orchestration(
         if let Some(host) = &cfg.room_host {
             if let Ok(host) = PeerId::from_str(host) {
                 *join_target = Some(host);
+                rooms.set_join_target(&host);
                 if swarm.is_connected(&host) {
                     enqueue(outbox, host, rooms.join_envelope());
                     flush_outbox(swarm, outbox, inflight, host);
@@ -1081,9 +1207,23 @@ async fn room_orchestration(
     }
 
     // Sealed: the host told us the room rotated under a key we never held.
-    // Don't re-attempt joins (or found a fork) — the UI shows why.
+    // Don't re-attempt joins (or found a fork) — the UI shows why. Sealed
+    // rooms die with their hosts and get re-founded, so re-arm discovery
+    // after 5 minutes instead of staying locked out for the process
+    // lifetime.
     if rooms.sealed {
-        return;
+        if sealed_since.is_none() {
+            *sealed_since = Some(std::time::Instant::now());
+        } else if sealed_since.unwrap().elapsed() >= Duration::from_secs(300) {
+            rooms.sealed = false;
+            *sealed_since = None;
+            let _ = event_tx.send(NodeEvent::Log {
+                message: "sealed-room latch expired — rediscovering the room".into(),
+            });
+        }
+        if rooms.sealed {
+            return;
+        }
     }
 
     // Online: consult the room record. This is both join discovery and
@@ -1093,8 +1233,27 @@ async fn room_orchestration(
             let _ = event_tx.send(NodeEvent::JoinStatus { status: "joining".into() });
             if let Ok(host) = PeerId::from_str(&rec.host_peer_id) {
                 *join_target = Some(host);
-                if swarm.is_connected(&host) {
+                // Always queue the Join for this host, not only when we
+                // are already connected: a mailbox-only host (the web
+                // portal registers no addresses) can never be dialed, so
+                // the outbox's handoff to the site mailbox is the only
+                // way in. Connected hosts flush immediately; otherwise
+                // the mail handoff delivers it after a couple of failed
+                // dial ticks. The 120 s cadence covers a lost Join (the
+                // worst-case mail round trip is ~80 s) without flooding
+                // the host's inbox with duplicate re-admits.
+                let retry_due = match join_mail.as_ref() {
+                    Some((sent_to, at)) => {
+                        *sent_to != host || at.elapsed() >= Duration::from_secs(120)
+                    }
+                    None => true,
+                };
+                if retry_due {
+                    rooms.set_join_target(&host);
                     enqueue(outbox, host, rooms.join_envelope());
+                    *join_mail = Some((host, std::time::Instant::now()));
+                }
+                if swarm.is_connected(&host) {
                     flush_outbox(swarm, outbox, inflight, host);
                 } else {
                     // Dial via the host's published addresses; retries on
@@ -1422,7 +1581,7 @@ fn dispatch_room_event(
                 sender,
                 body: String::from_utf8_lossy(&body).into_owned(),
                 epoch,
-                via_site: false,
+                via_site,
             });
         }
         RoomEvent::MembersChanged { room_id_hex, members } => {

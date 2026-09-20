@@ -56,6 +56,34 @@ fi
 BUNDLE_DIR="target/release/bundle"
 DL="$OH_PUB/download"
 
+# --- 2b. publish the web-portal key (gk.json) ------------------------------
+# The browser portal (/join) derives its rooms from the FINISHED global key
+# GK = SHA256("OH1-gk-v2" | channel | secret) — the same 32 bytes build.rs
+# embeds in the app. NEVER write the shares or the raw secret to the site:
+# the finished GK is the portal's contract (it reaches every browser tab by
+# design), while the secret/channel must stay off the public site. Getting
+# this wrong splits the app and portal room universes (they never meet).
+if [ -n "${OH_GLOBAL_KEY:-}" ]; then
+  echo "deploy: OH_GLOBAL_KEY is set — build.rs would prefer it over the release shares and the site would publish a different GK. Unset it and use OH_GK_A/OH_GK_B." >&2
+  exit 1
+fi
+node -e '
+  const fs = require("fs"), crypto = require("crypto");
+  const a = Buffer.from(process.env.OH_GK_A || "", "hex");
+  const b = Buffer.from(process.env.OH_GK_B || "", "hex");
+  if (a.length !== 32 || b.length !== 32) throw new Error("release key shares missing");
+  const secret = Buffer.alloc(32);
+  for (let i = 0; i < 32; i++) secret[i] = a[i] ^ b[i];
+  const channel = fs.readFileSync("core/src/gk_channel.bin");
+  if (channel.length !== 16) throw new Error("gk_channel.bin must be 16 bytes");
+  const gk = crypto.createHash("sha256")
+    .update(Buffer.concat([Buffer.from("OH1-gk-v2|"), channel, secret]))
+    .digest("base64url");
+  fs.writeFileSync(process.argv[1] + "/gk.json",
+    JSON.stringify({ version: process.argv[2], gk_b64: gk }, null, 2) + "\n");
+' "$OH_PUB" "$new"
+echo "deploy: wrote $OH_PUB/gk.json (finished GK for the web portal)"
+
 # --- 3. ship fresh artifacts ----------------------------------------------
 # tauri emits OnlyHumans_<ver>_x64-setup.exe; the site has always linked
 # the flatter OnlyHumans-Setup-<ver>.exe — keep that public name. Match the

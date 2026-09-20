@@ -215,18 +215,26 @@ impl HubClient {
         Ok(())
     }
 
-    /// Queue sealed envelopes for a peer we cannot reach directly. Items
-    /// are signed by us; the peer drains them on its next hub cycle.
-    pub async fn mail_push(&self, id: &Identity, to: &str, envelopes: &[crate::rooms::Envelope]) -> anyhow::Result<()> {
+    /// Queue sealed envelopes for peers we cannot reach directly, as ONE
+    /// batched request carrying mixed recipients (the hub throttles per
+    /// SENDER to one push every 4 s and caps a push at 16 items — callers
+    /// pass at most 16 envelopes and at most one batch per few seconds).
+    /// Items are signed by us; peers drain them on their next hub cycle.
+    pub async fn mail_push_many(
+        &self,
+        id: &Identity,
+        items: &[(String, crate::rooms::Envelope)],
+    ) -> anyhow::Result<()> {
+        assert!(items.len() <= 16, "the hub caps a mail push at 16 items");
         let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis() as u64;
         let pub_b64 = crate::crypto::base64_encode(&id.public_key_bytes());
         let from = id.id_string();
-        let mut items = Vec::with_capacity(envelopes.len());
-        for env in envelopes {
+        let mut out = Vec::with_capacity(items.len());
+        for (to, env) in items {
             let env_json = serde_json::to_string(env)?;
             let sig = id.sign(&mail_canonical(&from, to, ts_ms, &env_json))?;
-            items.push(MailItem {
-                to: to.to_string(),
+            out.push(MailItem {
+                to: to.clone(),
                 from: from.clone(),
                 public_key_b64: pub_b64.clone(),
                 env_json,
@@ -237,7 +245,7 @@ impl HubClient {
         let resp = self
             .http
             .post(format!("{}/api/inbox", self.base))
-            .json(&serde_json::json!({ "items": items }))
+            .json(&serde_json::json!({ "items": out }))
             .send()
             .await?;
         if !resp.status().is_success() {

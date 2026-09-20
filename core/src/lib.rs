@@ -30,9 +30,13 @@ static GK_CHANNEL: &[u8] = include_bytes!("gk_channel.bin");
 /// this function embeds them. The share/env hex values never become
 /// string literals in the compiled binary (deriving here via `option_env!`
 /// did exactly that on targets where the optimizer keeps the literals in
-/// .rodata). Carrying the 32 key bytes is the intended barrier: getting
-/// the community key out of a shipped binary requires scheme-aware
-/// analysis, not `strings`.
+/// .rodata). Note the finished release-channel GK is PUBLIC BY DESIGN
+/// since the web portal: the site's /gk.json hands it to every browser
+/// tab (they must seal/unseal with it), so GK knowledge is not a secret
+/// from the site's audience — admission strength comes from the room
+/// word, and "earth" is public. The SHARES and the channel secret remain
+/// the protected material: they exist only on release machines and in
+/// release builds' derivation, never on the site.
 pub fn global_key() -> crypto::Key {
     *include_bytes!(concat!(env!("OUT_DIR"), "/gk.bin"))
 }

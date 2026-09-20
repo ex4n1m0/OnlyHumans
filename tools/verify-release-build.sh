@@ -10,7 +10,7 @@ export OH_GK_A OH_GK_B
 
 EXE=target/release/OnlyHumans.exe
 SETUP=$(ls -t target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
-EXPECT_ROOM=7ce7d037f2428e5377b188489a20bc3c
+EXPECT_ROOM=f44aa613ee5a9cafa7fd22b531998bcf
 
 echo "== room_id (release profile) =="
 ROOM=$(cargo run -q --release -p onlyhumans_core --example room_id 2>/dev/null | head -1)
@@ -50,7 +50,7 @@ for fname, path in files.items():
             print(f"clean: {fname} — {label} hex string absent")
 
 exe = open("target/release/OnlyHumans.exe", "rb").read()
-target_room = "7ce7d037f2428e5377b188489a20bc3c"
+target_room = "f44aa613ee5a9cafa7fd22b531998bcf"
 hits = []
 for i in range(len(exe) - 32):
     w = exe[i:i+32]
