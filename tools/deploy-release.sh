@@ -8,9 +8,8 @@
 #   OH_NO_BUMP=1 . tools/deploy-release.sh     # re-ship the same version
 #   OH_PUB=/path/to/ohpub . tools/...          # non-default site root
 #
-# Platform-aware: run it on Windows (Git Bash) to ship the NSIS installer,
-# from WSL to ship deb/AppImage. Blocks for platforms not built in this
-# run keep their existing version.json entries.
+# Windows-only: ships the NSIS installer. Other desktops join through the
+# browser portal (/join) — no native build, no per-platform release runs.
 set -euo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
 OH_PUB="${OH_PUB:-$(cd .. && pwd)/ohpub}"
@@ -123,19 +122,12 @@ fi
 # exact version: older bundles linger in the bundle dir and a glob would
 # feed cp two sources.
 cp -f "$BUNDLE_DIR"/nsis/OnlyHumans_"$new"_x64-setup.exe "$DL/OnlyHumans-Setup-$new.exe" ||
-  echo "no NSIS bundle in this run (linux host?) — windows entry unchanged"
-cp -f "$BUNDLE_DIR"/deb/*.deb "$DL"/ 2>/dev/null || true
-cp -f "$BUNDLE_DIR"/appimage/*.AppImage "$DL"/ 2>/dev/null || true
+  echo "no NSIS bundle in this run — windows entry unchanged"
 
-# --- 4. prune older artifacts: keep the newest of each platform family ----
+# --- 4. prune older artifacts: keep the newest installer ---------------------
 # Runs AFTER the copy so the file this deploy just superseded also goes.
-prune() {
-  find "$DL" -maxdepth 1 -name "$1" -printf '%f\n' | sort -V | head -n -1 |
-    while read -r f; do rm -f "$DL/$f"; done
-}
-prune 'OnlyHumans-Setup-*.exe'
-prune 'OnlyHumans_*_amd64.AppImage'
-prune 'OnlyHumans_*_amd64.deb'
+find "$DL" -maxdepth 1 -name 'OnlyHumans-Setup-*.exe' -printf '%f\n' | sort -V | head -n -1 |
+  while read -r f; do rm -f "$DL/$f"; done
 
 node tools/gen-version-json.js "$OH_PUB" "$new" "$(date +%F)"
 echo "deploy: shipped to $DL"

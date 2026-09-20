@@ -28,9 +28,7 @@
     "publisher": "DeepFlux",
     "copyright": "(c) 2026 DeepFlux",
     "targets": [
-      "nsis",
-      "deb",
-      "appimage"
+      "nsis"
     ],
     "icon": [
       "icons/32x32.png",

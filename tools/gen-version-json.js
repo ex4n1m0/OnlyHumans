@@ -2,11 +2,8 @@
 // download dir. Run by tools/deploy-release.sh:
 //   node tools/gen-version-json.js <ohpub-root> <new-version> <today>
 //
-// Platform-aware: blocks whose artifacts were not rebuilt in this run keep
-// their previous entries (e.g. a Windows-only deploy leaves the linux
-// block pointing at the still-shipped 1.0.0 AppImage). Field formats match
-// what index.html renders: windows size "5.4 MB", appimageSize "87 MB",
-// debSize "10.7" (site appends MB).
+// Windows-only: the single installer entry. Field formats match what
+// index.html renders: size "5.4 MB", file "/download/OnlyHumans-Setup-x.y.z.exe".
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -32,19 +29,8 @@ if (win) {
   out.file = file(win);
 }
 
-const appimage = exists(path.join(dl, `OnlyHumans_${version}_amd64.AppImage`));
-const deb = exists(path.join(dl, `OnlyHumans_${version}_amd64.deb`));
-if (appimage || deb) {
-  out.linux = {
-    ...(prev.linux || {}),
-    version,
-    date,
-    ...(appimage
-      ? { appimage: file(appimage), appimageSize: mb(appimage) + " MB" }
-      : {}),
-    ...(deb ? { deb: file(deb), debSize: mb(deb) } : {}),
-  };
-}
+// Linux builds are gone for good — never resurrect a stale block.
+delete out.linux;
 
 if (!out.version) {
   console.error("gen-version-json: no artifacts for " + version + " and no previous state");
