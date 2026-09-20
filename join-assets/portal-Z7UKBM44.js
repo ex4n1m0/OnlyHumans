@@ -19,7 +19,7 @@
           <div class="gaterow">
             <button id="p-earth" class="earth" type="button" title="join the public room everyone meets in">\u{1F30D} Earth \u2014 the public room</button>
           </div>
-          <p class="gatenote">Every room is a word. <b>Earth</b> is the one
+          <p class="gatenote">Every word is a room. <b>Earth</b> is the one
           everyone meets in \u2014 the first person online creates it. Type or roll
           your own word and only people who use the same word can find you;
           the word never leaves your device.</p>

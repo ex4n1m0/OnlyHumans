@@ -3,16 +3,16 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>OnlyHumans — encrypted chat between humans, no message servers</title>
-<meta name="description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub and a sealed fallback mailbox.">
+<title>OnlyHumans — every word is a room</title>
+<meta name="description" content="Every word is a room. “Earth” is the room everyone shares; your own word is a room only your people can find. Sealed end-to-end, no accounts, no servers reading your words. Windows app or any browser.">
 <meta name="theme-color" content="#000000">
 <link rel="canonical" href="https://onlyhumans.deepflux.space/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://onlyhumans.deepflux.space/">
-<meta property="og:title" content="OnlyHumans — encrypted chat between humans, no message servers">
-<meta property="og:description" content="Peer-to-peer encrypted chat. One room, everyone in it, no servers reading or storing your words — only a signed, expiring address hub and a sealed fallback mailbox.">
-<meta property="og:image" content="https://onlyhumans.deepflux.space/icon-256.png">
-<meta name="twitter:card" content="summary">
+<meta property="og:title" content="OnlyHumans — every word is a room">
+<meta property="og:description" content="Type “earth” and you're in the room everyone shares. Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
+<meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/icon-256.png">
 <script type="application/ld+json">
@@ -268,11 +268,12 @@
         <source type="image/webp" srcset="/logo-hero.webp">
         <img class="hero-logo" src="/logo.png" alt="OnlyHumans logo" width="1254" height="1254" decoding="async" fetchpriority="high">
       </picture>
-      <h1>Chat that never passes through <em>a server</em>.</h1>
-      <p class="lead">Every room is a word. Earth is the room everyone
-      meets in; your own word is a room only your people can find. Messages
-      travel straight between devices, sealed end-to-end —<br>
-      this site only ever holds signed, expiring addresses so peers can find each other.</p>
+      <h1>Every word is a <em>room</em>.</h1>
+      <p class="lead">Type <b>earth</b> and you're in the room everyone
+      shares. Type your own word and you're in a room only your people can
+      find — the word never leaves your device. Messages are sealed
+      end-to-end and travel straight between you;<br>
+      this site never sees a word.</p>
 
       <p class="hero-live" id="hero-live" hidden>
         <span class="live-dot" aria-hidden="true"></span>
@@ -333,21 +334,21 @@
     <div class="stat">
       <div class="n">0</div>
       <div class="t">servers read your words</div>
-      <div class="d">Messages go device to device, sealed on your device with
-      per-message keys. The hub stores addresses and sealed fallback mail —
-      never a word it could read.</div>
+      <div class="d">Every message gets its own key, on your device. The
+      site only ever holds addresses and sealed mail it cannot read.</div>
     </div>
     <div class="stat">
       <div class="n">2</div>
-      <div class="t">ways in, one protocol</div>
+      <div class="t">ways in — app or browser</div>
       <div class="d">The Windows app and any browser meet in the same sealed
       rooms. No accounts, no invites: a name and a word.</div>
     </div>
     <div class="stat">
       <div class="n">1</div>
-      <div class="t">word gates the door</div>
-      <div class="d">Your room word is stretched into every key — the site's
-      base key alone admits no one. Rotate the room key and the door closes
+      <div class="t">word = 1 room</div>
+      <div class="d">Type the same word as your friends and you're in the
+      same room — the word never leaves your device, and guessing one is
+      made deliberately expensive. Rotate the room key and the door closes
       behind you, forever.</div>
     </div>
   </div>
@@ -369,11 +370,11 @@
     </div>
     <div class="layer" id="layer-talk" hidden role="tabpanel" aria-labelledby="tab-talk">
       <h3>Talking <span class="tag">direct · end-to-end · padded</span></h3>
-      <p>When you open the app you prove knowledge of the community key,
-      receive the room key sealed for you, and talk straight to everyone in
-      the room — per-message keys derived from a room key that never touches a
-      server, frames padded so even their lengths stay quiet. The relay path,
-      if your network needs one, carries only ciphertext.</p>
+      <p>When you join, the host hands you the room key — sealed for you
+      alone — and you talk straight to everyone in the room. Every message
+      gets its own key, frames are padded so even their lengths stay quiet,
+      and the relay path, if your network needs one, carries only
+      ciphertext.</p>
     </div>
     <div class="layer" id="layer-fallback" hidden role="tabpanel" aria-labelledby="tab-fallback">
       <h3>When two people can't connect <span class="tag">sealed · signed · timestamped</span></h3>
@@ -416,7 +417,7 @@
     <h3>Out of scope — honest limits</h3>
     <ul>
       <li>A compromised device: malware on your machine can read your screen</li>
-      <li>Guessable code words: a code room is isolation from strangers, not access control — pick unguessable words</li>
+      <li>Guessable words: a word room keeps out strangers who don't know the word — pick unguessable ones (the app rolls them for you)</li>
       <li>Global traffic analysis: metadata-resistant routing is not implemented</li>
       <li>Browser clients: the /join portal keeps your key in browser storage — weaker than the signed app's. Fine for casual rooms; use the app for serious ones</li>
     </ul>
@@ -450,11 +451,11 @@
   </details>
   <details name="faq">
     <summary>What's a word room?</summary>
-    <p>Type a word at the door and you're in a room with everyone who types
-    the same word. The word never leaves your device — each machine derives
-    the same room from it, stretched through a memory-hard key function so
-    guessing is expensive. Roll a generated phrase for private rooms; Earth
-    is the public one.</p>
+    <p>Exactly what it sounds like: type a word at the door and you're in a
+    room with everyone who types the same word. The word never leaves your
+    device — each machine derives the same room from it, through a
+    memory-hard function that makes guessing expensive. Roll a generated
+    phrase for private rooms; Earth is the public one.</p>
   </details>
   <details name="faq">
     <summary>Someone was offline when I sent a message. Is it lost?</summary>
@@ -484,8 +485,9 @@
   </details>
   <details name="faq">
     <summary>Does it work on my phone?</summary>
-    <p>From any browser, yes — open <a href="/join">/join</a>. A native
-    Android app is still planned.</p>
+    <p>Yes — open <a href="/join">/join</a> in any browser, nothing to
+    install. The portal keeps one session's messages; the app keeps
+    history.</p>
   </details>
   </div>
 
