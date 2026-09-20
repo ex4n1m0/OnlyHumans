@@ -2,7 +2,7 @@
 // room member. See portal.ts for the protocol mirror + KAT provenance.
 
 import {
-  Hub, RoomCrypto, buildJoin, effectiveGk, globalRoomHex, genRoomPhrase,
+  Hub, RoomCrypto, buildJoin, effectiveGk, globalRoomHex,
   openRoomKey, sealRoomKey, peerIdFromPublic, publicKeyProtobuf,
   ed25519RawFromProtobuf, verifyMailItem, admissionProof,
   b64, unb64, unhex, hex, utf8, fromUtf8, concat, type Envelope, type MemberInfo, type Sealed,
@@ -554,18 +554,14 @@ function render() {
           <p>Same sealed rooms as the desktop app — no install, no account.</p>
           <div class="gaterow">
             <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="gaterow">
             <button id="p-join" class="primary" type="button">Enter the room</button>
-          </div>
-          <div class="gaterow">
             <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false">
-            <button id="p-dice" class="dice" type="button" title="roll a strong private word">🎲</button>
-          </div>
-          <div class="gaterow">
-            <button id="p-earth" class="earth" type="button" title="join the public room everyone meets in">🌍 Earth — the public room</button>
           </div>
           <p class="gatenote">Every word is a room. <b>Earth</b> is the one
-          everyone meets in — the first person online creates it. Type or roll
-          your own word and only people who use the same word can find you;
+          everyone meets in — the first person online creates it. Type your
+          own word and only people who use the same word can find you;
           the word never leaves your device.</p>
           <p class="gatenote">Everything you send travels end-to-end sealed
           through the site's mailbox; delivery between a browser and a PC app
@@ -577,8 +573,6 @@ function render() {
       </div>`;
     const word = $("p-word") as HTMLInputElement;
     word.value = "earth";
-    $("p-dice")?.addEventListener("click", () => { word.value = genRoomPhrase(); word.focus(); });
-    $("p-earth")?.addEventListener("click", () => { word.value = "earth"; });
     $("p-join")?.addEventListener("click", () => void doJoin());
     ($("p-name") as HTMLInputElement).addEventListener("keydown", (e) => { if (e.key === "Enter") void doJoin(); });
     word.addEventListener("keydown", (e) => { if (e.key === "Enter") void doJoin(); });

@@ -6,8 +6,13 @@
 import fs from "node:fs";
 
 const DIR = "join-assets";
-const built = fs.readdirSync(DIR).filter((f) => /^portal-[0-9A-Za-z_-]+\.js$/.test(f)).sort();
-const latest = built.at(-1);
+// Newest by modification time — hash names do not sort by age, and a
+// stale bundle from an earlier build can sort after the fresh one.
+const built = fs.readdirSync(DIR)
+  .filter((f) => /^portal-[0-9A-Za-z_-]+\.js$/.test(f))
+  .map((f) => ({ f, m: fs.statSync(`${DIR}/${f}`).mtimeMs }))
+  .sort((a, b) => b.m - a.m);
+const latest = built[0]?.f;
 if (!latest) throw new Error("link-bundle: no hashed portal bundle in join-assets/");
 
 let html = fs.readFileSync("join.html", "utf8");
