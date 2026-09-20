@@ -37,8 +37,13 @@ check("peerIdFromPublic", peerIdFromPublic(rawPub) === kat.peer_id,
   peerIdFromPublic(rawPub));
 
 // 5. GK-sealed room key delivery opens to the room key
-const roomKey = openRoomKey(earth, unhex(kat.room_hex), kat.peer_id, unb64(kat.key_ct_b64));
+const roomKey = openRoomKey(earth, unhex(kat.room_hex), kat.key_ct_epoch, kat.peer_id, unb64(kat.key_ct_b64));
 check("openRoomKey", unhex(kat.room_key_hex).every((b, i) => b === roomKey[i]));
+// The delivery seal must be epoch-bound: the same ciphertext must not
+// open under a different epoch.
+let epochBound = false;
+try { openRoomKey(earth, unhex(kat.room_hex), kat.key_ct_epoch + 1, kat.peer_id, unb64(kat.key_ct_b64)); } catch { epochBound = true; }
+check("openRoomKey epoch binding", epochBound);
 
 // 6. Open a Rust-sealed chat frame
 const rc = new RoomCrypto(unhex(kat.room_hex), 1, unhex(kat.room_key_hex));

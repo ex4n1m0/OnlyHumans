@@ -279,7 +279,7 @@ class Portal {
       if (!this.hostId || from !== this.hostId) return;
       if (!Number.isInteger(kd.epoch) || kd.epoch < 1) return;
       if (this.room && kd.epoch < this.room.epoch) return; // no regression
-      const key = openRoomKey(this.egk, unhex(this.roomHex), this.peerId, unb64(kd.key_ct_b64));
+      const key = openRoomKey(this.egk, unhex(this.roomHex), kd.epoch, this.peerId, unb64(kd.key_ct_b64));
       this.room = new RoomCrypto(unhex(this.roomHex), kd.epoch, key);
       this.members = new Map(kd.members.map((m) => [m.peer, m.name]));
       this.mySeq = Date.now();
@@ -351,7 +351,11 @@ class Portal {
     const nonce = unb64(j.guest_nonce_b64);
     const expect = admissionProof(this.egk, j.guest_id, nonce);
     const got = unb64(j.guest_proof_b64);
-    if (expect.length !== got.length || !expect.every((b, i) => b === got[i])) return; // proof failed
+    // Constant-time compare — proof bytes cross the network.
+    let diff = 0;
+    if (expect.length !== got.length) return; // proof failed
+    for (let i = 0; i < expect.length; i++) diff |= expect[i] ^ got[i];
+    if (diff !== 0) return; // proof failed
     const isNew = !this.members.has(from);
     this.members.set(from, j.name || from.slice(0, 10));
     if (isNew) this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${j.name || from.slice(0, 10)} joined`, out: false });
@@ -359,7 +363,7 @@ class Portal {
       KeyDelivery: {
         room_id_hex: this.roomHex,
         epoch: this.room.epoch,
-        key_ct_b64: b64(sealRoomKey(this.egk, this.room.roomId, from, this.room.key)),
+        key_ct_b64: b64(sealRoomKey(this.egk, this.room.roomId, this.room.epoch, from, this.room.key)),
         members: [...this.members.entries()].map(([peer, name]) => ({ peer, name })),
       },
     };

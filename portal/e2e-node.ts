@@ -38,7 +38,7 @@ for (let i = 0; i < 50 && !room; i++) {
     const env = JSON.parse(it.env_json);
     if ("KeyDelivery" in env) {
       const kd = env.KeyDelivery;
-      const key = openRoomKey(egk, unhex(roomHex), peerId, unb64(kd.key_ct_b64));
+      const key = openRoomKey(egk, unhex(roomHex), kd.epoch, peerId, unb64(kd.key_ct_b64));
       room = new RoomCrypto(unhex(roomHex), kd.epoch, key);
       kd.members.forEach((m) => members.set(m.peer, m.name));
       console.log(`JOINED — ${kd.members.length} member(s): ${[...members.values()].join(", ")}`);

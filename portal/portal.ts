@@ -157,16 +157,21 @@ function aad(kind: Uint8Array, room: Uint8Array, epoch: number, sender: string, 
   return concat(utf8("OH1"), kind, room, u64le(epoch), utf8(sender), u64le(seq));
 }
 
-export function sealRoomKey(gk: Uint8Array, roomId: Uint8Array, recipient: string, key: Uint8Array): Uint8Array {
-  const nonce = hkdf32(gk, roomId, utf8("gk-deliv-nonce")).subarray(0, 24);
-  const cipherKey = hkdf32(gk, roomId, utf8("gk-deliv-key"));
-  return xchacha20poly1305(cipherKey, nonce, aad(KIND.gkDeliv, roomId, 1, recipient, 0)).encrypt(key);
+/// The delivery keystream is bound to (GK, room, epoch, recipient): no two
+/// delivery targets share cipher output, so a former member with an old
+/// room key plus captured deliveries can never XOR out a newer key.
+export function sealRoomKey(gk: Uint8Array, roomId: Uint8Array, epoch: number, recipient: string, key: Uint8Array): Uint8Array {
+  const info = concat(utf8("gk-deliv-v2|"), u64le(epoch), utf8(recipient));
+  const nonce = hkdf32(gk, roomId, concat(info, utf8("|n"))).subarray(0, 24);
+  const cipherKey = hkdf32(gk, roomId, concat(info, utf8("|k")));
+  return xchacha20poly1305(cipherKey, nonce, aad(KIND.gkDeliv, roomId, epoch, recipient, 0)).encrypt(key);
 }
 
-export function openRoomKey(gk: Uint8Array, roomId: Uint8Array, recipient: string, ct: Uint8Array): Uint8Array {
-  const nonce = hkdf32(gk, roomId, utf8("gk-deliv-nonce")).subarray(0, 24);
-  const cipherKey = hkdf32(gk, roomId, utf8("gk-deliv-key"));
-  return xchacha20poly1305(cipherKey, nonce, aad(KIND.gkDeliv, roomId, 1, recipient, 0)).decrypt(ct);
+export function openRoomKey(gk: Uint8Array, roomId: Uint8Array, epoch: number, recipient: string, ct: Uint8Array): Uint8Array {
+  const info = concat(utf8("gk-deliv-v2|"), u64le(epoch), utf8(recipient));
+  const nonce = hkdf32(gk, roomId, concat(info, utf8("|n"))).subarray(0, 24);
+  const cipherKey = hkdf32(gk, roomId, concat(info, utf8("|k")));
+  return xchacha20poly1305(cipherKey, nonce, aad(KIND.gkDeliv, roomId, epoch, recipient, 0)).decrypt(ct);
 }
 
 // ----------------------------------------------------------- sealed frames
