@@ -10,9 +10,8 @@ through a server that could read them.
 This repository contains two things:
 
 1. **`index.html`** — the single-page site (no framework, no trackers, no
-   third-party requests): download buttons for the Windows/Linux installers,
-   screenshots, a "how it works" tour, a graded security model, FAQ, and a
-   changelog.
+   third-party requests): the Windows download button, the join-from-browser
+   portal, a "how it works" tour, a graded security model, and a FAQ.
 2. **`api/`** — the hub the desktop app talks to: Vercel serverless functions
    backed by Upstash Redis (REST, no SDK). The hub is deliberately
    **untrusted storage**: it verifies signatures before storing bytes it
@@ -64,11 +63,13 @@ still renders — it just shows no live counter.
 
 ## Releases
 
-`version.json` drives the site's download buttons (version, sizes, deploy
-date, file paths); the installers themselves live in `download/`
-(`.exe` for Windows, `.AppImage` and `.deb` for Linux). To ship a release:
-drop the new artifacts into `download/`, update `version.json` and the
-fallback `href`s in `index.html`, and add a changelog line on the site.
+Windows is the only native platform (macOS/Linux users join through the
+browser portal). `version.json` drives the site's download button (version,
+size, date, file path); the installer lives in `download/`
+(`OnlyHumans-Setup-x.y.z.exe`). Releases are cut from the app repo with
+`tools/deploy-release.sh`, which bumps the version, rebuilds the installer,
+and regenerates `version.json` — then the fallback `href` and `v…` meta in
+`index.html` are updated to match.
 
 ## Honest limits
 

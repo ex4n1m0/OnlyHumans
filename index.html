@@ -300,8 +300,8 @@
         everyone, your own word for just your people. Nothing to configure,
         no account to create. <b>Each version is its own room</b> — to meet
         people on the newest app, keep yours up to date from this page.
-        Windows 10/11 today; Linux builds return once the Windows version
-        is fully polished.</span>
+        Windows 10/11; every other device joins from the browser button
+        above.</span>
       </div>
     </div>
   </div>
@@ -564,7 +564,7 @@
     });
   })();
 
-  // Version metadata (Windows is the focus; Linux returns later).
+  // Version metadata (Windows installer; other devices join via /join).
   (function () {
     fetch("/version.json")
       .then(function (r) { return r.ok ? r.json() : null; })
