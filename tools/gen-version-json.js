@@ -9,6 +9,7 @@
 // debSize "10.7" (site appends MB).
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const [ohpub, version, date] = process.argv.slice(2);
 const dl = path.join(ohpub, "download");
@@ -48,6 +49,18 @@ if (appimage || deb) {
 if (!out.version) {
   console.error("gen-version-json: no artifacts for " + version + " and no previous state");
   process.exit(1);
+}
+
+// Stamp the GK fingerprint (first 8 hex of the deployed GK, from the
+// gk.json deploy-release.sh just wrote). A split-universe ship — site
+// gk.json vs installer GK — becomes diffable post-hoc: sha256 of gk.json's
+// gk_b64 bytes must start with this prefix.
+const gkPath = path.join(ohpub, "gk.json");
+if (fs.existsSync(gkPath)) {
+  const gkB64 = JSON.parse(fs.readFileSync(gkPath, "utf8")).gk_b64 ?? "";
+  out.gk = crypto.createHash("sha256").update(Buffer.from(gkB64, "base64url")).digest("hex").slice(0, 8);
+} else {
+  delete out.gk;
 }
 
 fs.writeFileSync(outPath, JSON.stringify(out, null, 2) + "\n");

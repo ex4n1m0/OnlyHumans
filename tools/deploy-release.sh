@@ -43,12 +43,26 @@ npm version "$new" --no-git-tag-version --allow-same-version >/dev/null
 # means old and new builds never mix (the site tells users to update).
 # OH_KEEP_KEY=1 reuses the existing key (re-shipping / patching a release).
 if [ "${OH_KEEP_KEY:-0}" != "1" ]; then
+  if [ "$new" = "$cur" ] && [ "${OH_FORCE_NEW_KEY:-0}" != "1" ]; then
+    echo "deploy: refusing to mint a fresh channel key for the SAME version ($new)." >&2
+    echo "  Everyone already running $new would land in a split, dead universe." >&2
+    echo "  Re-ship $new with its existing key via OH_KEEP_KEY=1, or set" >&2
+    echo "  OH_FORCE_NEW_KEY=1 if you truly mean to cut a new universe unbumped." >&2
+    exit 1
+  fi
   mkdir -p secrets
   A=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
   B=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
   printf '# Release-channel global key - minted %s (fresh per release: every version is its own room).\n# Two XOR shares (secret = A xor B); never commit this file.\nexport OH_GK_A=%s\nexport OH_GK_B=%s\n' \
     "$(date +%F)" "$A" "$B" > secrets/release-gk.env
   echo "deploy: minted fresh channel key for $new"
+else
+  if [ ! -f secrets/release-gk.env ]; then
+    echo "deploy: OH_KEEP_KEY=1 but secrets/release-gk.env does not exist — the build" >&2
+    echo "  would fall back to a per-clone local key and the site would publish a GK" >&2
+    echo "  that matches no shipped installer. Mint first (normal bump) instead." >&2
+    exit 1
+  fi
 fi
 
 # --- 2. build with the release-channel key (release-build.sh ritual) -----
@@ -56,7 +70,7 @@ fi
 BUNDLE_DIR="target/release/bundle"
 DL="$OH_PUB/download"
 
-# --- 2b. publish the web-portal key (gk.json) ------------------------------
+# --- 2b. publish the web-portal key ----------------------------------------
 # The browser portal (/join) derives its rooms from the FINISHED global key
 # GK = SHA256("OH1-gk-v2" | channel | secret) — the same 32 bytes build.rs
 # embeds in the app. NEVER write the shares or the raw secret to the site:
@@ -67,8 +81,8 @@ if [ -n "${OH_GLOBAL_KEY:-}" ]; then
   echo "deploy: OH_GLOBAL_KEY is set — build.rs would prefer it over the release shares and the site would publish a different GK. Unset it and use OH_GK_A/OH_GK_B." >&2
   exit 1
 fi
-node -e '
-  const fs = require("fs"), crypto = require("crypto");
+GK_B64=$(node -e '
+  const fs = require("fs");
   const a = Buffer.from(process.env.OH_GK_A || "", "hex");
   const b = Buffer.from(process.env.OH_GK_B || "", "hex");
   if (a.length !== 32 || b.length !== 32) throw new Error("release key shares missing");
@@ -76,13 +90,32 @@ node -e '
   for (let i = 0; i < 32; i++) secret[i] = a[i] ^ b[i];
   const channel = fs.readFileSync("core/src/gk_channel.bin");
   if (channel.length !== 16) throw new Error("gk_channel.bin must be 16 bytes");
-  const gk = crypto.createHash("sha256")
+  process.stdout.write(require("crypto").createHash("sha256")
     .update(Buffer.concat([Buffer.from("OH1-gk-v2|"), channel, secret]))
-    .digest("base64url");
+    .digest("base64url"));
+')
+node -e '
+  const fs = require("fs");
   fs.writeFileSync(process.argv[1] + "/gk.json",
-    JSON.stringify({ version: process.argv[2], gk_b64: gk }, null, 2) + "\n");
-' "$OH_PUB" "$new"
+    JSON.stringify({ version: process.argv[2], gk_b64: process.argv[3] }, null, 2) + "\n");
+' "$OH_PUB" "$new" "$GK_B64"
 echo "deploy: wrote $OH_PUB/gk.json (finished GK for the web portal)"
+
+# The DEPLOYED portal reads the GK from the /api/gk function backed by
+# Vercel env vars — the git tree carries no key file, so a git-push
+# deploy must still serve the right universe. Env changes take effect on
+# the next `vercel --prod` (run it after this script).
+if command -v vercel >/dev/null 2>&1 && [ -d "$OH_PUB/.vercel" ]; then
+  ( cd "$OH_PUB" \
+    && { vercel env rm OH_GK_B64 production -y >/dev/null 2>&1 || true; } \
+    && { vercel env rm OH_GK_VERSION production -y >/dev/null 2>&1 || true; } \
+    && printf '%s' "$GK_B64" | vercel env add OH_GK_B64 production \
+    && printf '%s' "$new" | vercel env add OH_GK_VERSION production ) \
+  || { echo "deploy: failed to set the Vercel OH_GK_* env vars — /api/gk would serve a stale universe. Fix and re-run before deploying." >&2; exit 1; }
+  echo "deploy: set Vercel env OH_GK_B64/OH_GK_VERSION (live on the next deploy)"
+else
+  echo "deploy: NOTE — vercel CLI or $OH_PUB/.vercel missing; /api/gk env vars NOT updated. Set OH_GK_B64/OH_GK_VERSION manually before deploying." >&2
+fi
 
 # --- 3. ship fresh artifacts ----------------------------------------------
 # tauri emits OnlyHumans_<ver>_x64-setup.exe; the site has always linked

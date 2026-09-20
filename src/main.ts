@@ -488,8 +488,8 @@ async function boot() {
 
   function statusLine(): string {
     switch (status) {
-      case "hosting": return "you host the room";
-      case "connected": return `connected · ${displayName(hostPeer)} hosts`;
+      case "hosting":
+      case "connected": return "connected";
       case "joining": return "knocking — proving you know the way in…";
       case "founding": return "creating the room — you're the first…";
       case "sealed": return "closed by key rotation";
@@ -576,7 +576,7 @@ function closeMenus() {
       <header class="cmdbar">
         <img class="brandlogo" src="/logo.png" alt="">
         <span class="logo">OnlyHumans</span>
-        <span class="roomchip" title="this window lives in ${earthRoom ? "the Earth room" : "a word room"} — rooms section on the left moves or adds rooms">
+        <span class="roomchip" title="this window lives in ${earthRoom ? "the Earth room" : "a word room"} — the room section on the left moves or adds rooms">
           <span class="rs-glyph">${codeRoom ? "◆" : "⌂"}</span>
           <span class="rs-label">${codeRoom ? "Code room" : "Main room"}</span>
         </span>
@@ -590,7 +590,7 @@ function closeMenus() {
       <main>
         <div class="sidebar">
           <div class="status live-status">${statusLine()}</div>
-          <div class="side-label">rooms</div>
+          <div class="side-label">this room</div>
           ${ready ? `
           <div data-room="${room}" class="roomcard ${activeRoom === room ? "active" : ""}" role="button" tabindex="0" aria-label="back to ${earthRoom ? "the Earth room" : "the word room"}">
             ${MAIN_ROOM_ICON}
@@ -606,19 +606,19 @@ function closeMenus() {
           <div class="side-label">people in the room</div>
           <ul class="member-list">
             ${ready ? `
-            <li class="${isHost ? "ishost" : ""}" title="this is you">
+            <li title="this is you">
               ${avatarHtml(myId, myName)}
               <div class="li-body">
                 <span class="mname">${escapeHtml(myName ? `${myName} (you)` : "you")}</span>
-                <span class="li-sub">${isHost ? "hosts the room" : "you"}</span>
+                <span class="li-sub">you</span>
               </div>
             </li>` : ""}
             ${others.map((m) => `
-            <li data-peer="${m.peer}" class="${m.peer === hostPeer ? "ishost" : ""}">
+            <li data-peer="${m.peer}">
               ${avatarHtml(m.peer, memberLabel(m))}
               <div class="li-body">
                 <span class="mname">${escapeHtml(memberLabel(m))}</span>
-                <span class="li-sub">${m.peer === hostPeer ? "hosts the room" : (connectedPeers.has(m.peer) ? "online" : "offline")}</span>
+                <span class="li-sub">${connectedPeers.has(m.peer) ? "online" : "offline"}</span>
               </div>
               <button class="dm-btn" data-peer="${m.peer}" aria-label="private chat with ${escapeHtml(memberLabel(m))}" title="private chat with ${escapeHtml(memberLabel(m))}">⇄</button>
               <button class="rename-btn" data-peer="${m.peer}" aria-label="rename ${escapeHtml(memberLabel(m))}" title="rename">✎</button>

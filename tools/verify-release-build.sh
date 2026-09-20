@@ -7,10 +7,12 @@ cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.."
 export PATH="$HOME/.cargo/bin:$PATH"
 set -a; source secrets/release-gk.env; set +a
 export OH_GK_A OH_GK_B
+OH_PUB="${OH_PUB:-$(cd .. && pwd)/ohpub}"
+export OH_PUB
 
 EXE=target/release/OnlyHumans.exe
 SETUP=$(ls -t target/release/bundle/nsis/*-setup.exe 2>/dev/null | head -1)
-EXPECT_ROOM=f44aa613ee5a9cafa7fd22b531998bcf
+EXPECT_ROOM=3a5075c38b232fc1d2d55d0bdbba84ea
 
 echo "== room_id (release profile) =="
 ROOM=$(cargo run -q --release -p onlyhumans_core --example room_id 2>/dev/null | head -1)
@@ -21,7 +23,7 @@ echo "installer: $SETUP"
 
 echo "== secret-absence + window scan =="
 python - <<'PYEOF'
-import hashlib, sys, glob, os
+import hashlib, sys, glob, os, json, base64
 
 def load():
     a = bytes.fromhex(os.environ["OH_GK_A"])
@@ -50,7 +52,7 @@ for fname, path in files.items():
             print(f"clean: {fname} — {label} hex string absent")
 
 exe = open("target/release/OnlyHumans.exe", "rb").read()
-target_room = "f44aa613ee5a9cafa7fd22b531998bcf"
+target_room = "3a5075c38b232fc1d2d55d0bdbba84ea"
 hits = []
 for i in range(len(exe) - 32):
     w = exe[i:i+32]
@@ -63,6 +65,20 @@ if hits:
 else:
     print("window scan: GK NOT found as raw bytes — INVESTIGATE")
     rc = 1
+
+print("== site gk.json consistency ==")
+gk_b64url = base64.urlsafe_b64encode(gk).decode().rstrip("=")
+site_path = os.path.join(os.environ.get("OH_PUB", os.path.join("..", "ohpub")), "gk.json")
+if os.path.exists(site_path):
+    site = json.load(open(site_path))
+    if site.get("gk_b64") == gk_b64url:
+        print(f"site gk.json GK matches this build's release GK (site version {site.get('version')})")
+    else:
+        print("MISMATCH: site gk.json holds a DIFFERENT GK than this build's shares")
+        print("  -> the portal and this installer would live in split room universes")
+        rc = 1
+else:
+    print(f"note: {site_path} absent — skipped site comparison (set OH_PUB)")
 sys.exit(rc)
 PYEOF
 rc=$?
