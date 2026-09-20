@@ -300,6 +300,13 @@ impl HubClient {
         if !Identity::verify(&pub_bytes, &canon, &sig) {
             anyhow::bail!("hub record failed signature verification");
         }
+        // The key must derive the claimed peer id — the hub is untrusted
+        // storage, so the binding the server enforces is enforced here too.
+        let key = libp2p::identity::PublicKey::try_decode_protobuf(&pub_bytes)
+            .map_err(|_| anyhow::anyhow!("peer record: bad public key protobuf"))?;
+        if key.to_peer_id().to_string() != reg.peer_id {
+            anyhow::bail!("peer record: key does not derive the claimed peer id");
+        }
         Ok(Some(reg))
     }
 
@@ -353,6 +360,13 @@ impl HubClient {
         }
         if !Identity::verify(&pub_bytes, &canon, &sig) {
             anyhow::bail!("room record failed signature verification");
+        }
+        // The key must derive the claimed host peer id (the server checks
+        // this too; we don't take the hub's word for it).
+        let key = libp2p::identity::PublicKey::try_decode_protobuf(&pub_bytes)
+            .map_err(|_| anyhow::anyhow!("room record: bad public key protobuf"))?;
+        if key.to_peer_id().to_string() != rec.host_peer_id {
+            anyhow::bail!("room record: key does not derive the claimed host");
         }
         Ok(Some(rec))
     }

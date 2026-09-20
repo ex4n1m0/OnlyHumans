@@ -47,14 +47,21 @@ pub fn verify_admission_proof(
     nonce: &[u8; 16],
     proof: &Key,
 ) -> bool {
-    admission_proof(gk, prover_id, nonce) == *proof
+    let expect = admission_proof(gk, prover_id, nonce);
+    // Constant-time compare — proof bytes cross the network.
+    let mut diff = 0u8;
+    for i in 0..32 {
+        diff |= expect[i] ^ proof[i];
+    }
+    diff == 0
 }
 
-/// Encrypt a room key for delivery to a new participant, under the GK.
-/// AAD binds the ciphertext to the room and recipient.
-pub fn seal_room_key(gk: &Key, room_id: &RoomId, recipient: &str, key: &Key) -> Vec<u8> {
-    let (nonce, cipher) = gk_cipher(gk, room_id);
-    let aad = aad_bytes(b"gk-deliv", room_id, 1, recipient, 0);
+/// Encrypt a room key for delivery to a participant, under the GK.
+/// The keystream is bound to (GK, room, epoch, recipient) and the AAD to
+/// the same, so no two delivery targets ever share cipher output.
+pub fn seal_room_key(gk: &Key, room_id: &RoomId, epoch: u64, recipient: &str, key: &Key) -> Vec<u8> {
+    let (nonce, cipher) = gk_cipher(gk, room_id, epoch, recipient);
+    let aad = aad_bytes(b"gk-deliv", room_id, epoch, recipient, 0);
     cipher
         .encrypt(
             &nonce,
@@ -66,9 +73,9 @@ pub fn seal_room_key(gk: &Key, room_id: &RoomId, recipient: &str, key: &Key) -> 
         .expect("seal_room_key encrypt")
 }
 
-pub fn open_room_key(gk: &Key, room_id: &RoomId, recipient: &str, ct: &[u8]) -> anyhow::Result<Key> {
-    let (nonce, cipher) = gk_cipher(gk, room_id);
-    let aad = aad_bytes(b"gk-deliv", room_id, 1, recipient, 0);
+pub fn open_room_key(gk: &Key, room_id: &RoomId, epoch: u64, recipient: &str, ct: &[u8]) -> anyhow::Result<Key> {
+    let (nonce, cipher) = gk_cipher(gk, room_id, epoch, recipient);
+    let aad = aad_bytes(b"gk-deliv", room_id, epoch, recipient, 0);
     let pt = cipher
         .decrypt(
             &nonce,
@@ -82,14 +89,27 @@ pub fn open_room_key(gk: &Key, room_id: &RoomId, recipient: &str, ct: &[u8]) -> 
     Ok(k)
 }
 
-/// Deterministic nonce + cipher for the GK delivery channel. A random nonce
-/// would also be safe (it travels with the frame) but binding it to
-/// (GK, room) makes delivery frames replay-safe within a room for free.
-fn gk_cipher(gk: &Key, room_id: &RoomId) -> (XNonce, XChaCha20Poly1305) {
-    let nonce_bytes = hkdf_sha256(gk, room_id, b"gk-deliv-nonce");
+/// Deterministic nonce + cipher for the GK delivery channel, bound to
+/// (GK, room, epoch, recipient). Binding the derivation to epoch and
+/// recipient is what makes rotation meaningful: under the earlier
+/// (GK, room)-only derivation every delivery for a room shared one
+/// keystream, so a former member holding an old room key plus any two
+/// captured deliveries could XOR out the newer key. Replay within the
+/// same (epoch, recipient) still yields the identical frame, which the
+/// idempotent delivery path already tolerates.
+fn gk_cipher(gk: &Key, room_id: &RoomId, epoch: u64, recipient: &str) -> (XNonce, XChaCha20Poly1305) {
+    let mut info = Vec::with_capacity(12 + 8 + recipient.len());
+    info.extend_from_slice(b"gk-deliv-v2|");
+    info.extend_from_slice(&epoch.to_le_bytes());
+    info.extend_from_slice(recipient.as_bytes());
+    let mut info_n = info.clone();
+    info_n.extend_from_slice(b"|n");
+    let mut info_k = info;
+    info_k.extend_from_slice(b"|k");
+    let nonce_bytes = hkdf_sha256(gk, room_id, &info_n);
     let mut n = [0u8; 24];
     n.copy_from_slice(&nonce_bytes[..24]);
-    let key_bytes = hkdf_sha256(gk, room_id, b"gk-deliv-key");
+    let key_bytes = hkdf_sha256(gk, room_id, &info_k);
     (XNonce::from(n), XChaCha20Poly1305::new(AeadKey::from_slice(&key_bytes)))
 }
 
@@ -445,14 +465,43 @@ mod tests {
     fn room_key_delivery_requires_gk() {
         let gk = gk();
         let host = RoomCrypto::new_host();
-        let ct = seal_room_key(&gk, &host.room_id, "peer-b", host.room_key());
-        let got = open_room_key(&gk, &host.room_id, "peer-b", &ct).unwrap();
+        let ct = seal_room_key(&gk, &host.room_id, 1, "peer-b", host.room_key());
+        let got = open_room_key(&gk, &host.room_id, 1, "peer-b", &ct).unwrap();
         assert_eq!(got, *host.room_key());
-        // Wrong recipient or wrong GK must fail
-        assert!(open_room_key(&gk, &host.room_id, "peer-c", &ct).is_err());
+        // Wrong recipient, wrong epoch, or wrong GK must fail
+        assert!(open_room_key(&gk, &host.room_id, 1, "peer-c", &ct).is_err());
+        assert!(open_room_key(&gk, &host.room_id, 2, "peer-b", &ct).is_err());
         let mut other = Key::default();
         other[0] = 43;
-        assert!(open_room_key(&other, &host.room_id, "peer-b", &ct).is_err());
+        assert!(open_room_key(&other, &host.room_id, 1, "peer-b", &ct).is_err());
+    }
+
+    #[test]
+    fn delivery_keystreams_differ_across_epochs_and_recipients() {
+        // F1 regression: under the old (GK, room)-only derivation every
+        // delivery for a room shared one keystream, so a former member
+        // (holding an old room key) plus two captured deliveries could
+        // XOR out the newer key — defeating rotation. Bound to (room,
+        // epoch, recipient), the XOR of two ciphertexts must not leak the
+        // XOR of the plaintexts.
+        let gk = gk();
+        let host = RoomCrypto::new_host();
+        let k1 = [1u8; 32];
+        let k2 = [2u8; 32];
+
+        let ct_e1 = seal_room_key(&gk, &host.room_id, 1, "peer-b", &k1);
+        let ct_e2 = seal_room_key(&gk, &host.room_id, 2, "peer-b", &k2);
+        let ct_other = seal_room_key(&gk, &host.room_id, 1, "peer-c", &k1);
+
+        let xor = |a: &[u8], b: &[u8]| -> Vec<u8> { a.iter().zip(b).map(|(x, y)| x ^ y).collect() };
+        let leaked = xor(&k1, &k2);
+        assert_ne!(xor(&ct_e1[..32], &ct_e2[..32]), leaked);
+        assert_ne!(ct_e1, ct_other, "recipients must not share ciphertexts");
+
+        // All are individually sound.
+        assert_eq!(open_room_key(&gk, &host.room_id, 1, "peer-b", &ct_e1).unwrap(), k1);
+        assert_eq!(open_room_key(&gk, &host.room_id, 2, "peer-b", &ct_e2).unwrap(), k2);
+        assert_eq!(open_room_key(&gk, &host.room_id, 1, "peer-c", &ct_other).unwrap(), k1);
     }
 
     #[test]

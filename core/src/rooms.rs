@@ -343,7 +343,9 @@ impl Rooms {
             );
         }
         let dm = &self.dms[&hex];
-        let ct = crypto::seal_room_key(&self.gk, &dm.crypto.room_id, &peer.to_string(), dm.crypto.room_key());
+        // DM rooms never rotate and the DmInvite envelope carries no epoch
+        // field, so the delivery seal is pinned to epoch 1 on both sides.
+        let ct = crypto::seal_room_key(&self.gk, &dm.crypto.room_id, 1, &peer.to_string(), dm.crypto.room_key());
         (hex.clone(), Envelope::DmInvite { room_id_hex: hex, key_ct_b64: crypto::base64_encode(&ct) })
     }
 
@@ -538,7 +540,7 @@ impl Rooms {
                     }
                 };
                 // The seal was made for OUR id — we are the joiner here.
-                let key = match crypto::open_room_key(&self.gk, &room_id, &self.my_id, &ct) {
+                let key = match crypto::open_room_key(&self.gk, &room_id, epoch, &self.my_id, &ct) {
                     Ok(k) => k,
                     Err(e) => {
                         out.push(err(&format!("key delivery failed: {e}")));
@@ -644,8 +646,8 @@ impl Rooms {
                     None => return out,
                 };
                 // The seal was made for OUR id — only the intended peer
-                // can open it.
-                let key = match crypto::open_room_key(&self.gk, &room_id, &self.my_id, &ct) {
+                // can open it. DMs pin epoch 1 (see the invite builder).
+                let key = match crypto::open_room_key(&self.gk, &room_id, 1, &self.my_id, &ct) {
                     Ok(k) => k,
                     Err(_) => {
                         out.push(err("dm invite failed GK authentication"));
@@ -725,6 +727,7 @@ impl Rooms {
                         let ct = crypto::seal_room_key(
                             &self.gk,
                             &dm.crypto.room_id,
+                            1, // DM deliveries pin epoch 1
                             &from.to_string(),
                             dm.crypto.room_key(),
                         );
@@ -767,7 +770,7 @@ impl Rooms {
             st.members.insert(guest.to_string(), sanitize_name(name));
             self.members()
         };
-        let ct = crypto::seal_room_key(&self.gk, &room_id, &guest.to_string(), &key);
+        let ct = crypto::seal_room_key(&self.gk, &room_id, epoch, &guest.to_string(), &key);
         let mut out = vec![
             RoomEvent::Send {
                 peer: guest,
@@ -1048,6 +1051,7 @@ mod seal_tests {
         let ct = crypto::seal_room_key(
             &host.gk,
             &hex::decode(host.room_hex()).unwrap().try_into().unwrap(),
+            1,
             &guest.my_id().to_string(),
             &key,
         );
@@ -1103,6 +1107,7 @@ mod seal_tests {
         let ct = crypto::seal_room_key(
             &host.gk,
             &hex::decode(host.room_hex()).unwrap().try_into().unwrap(),
+            5,
             &guest.my_id().to_string(),
             &key,
         );

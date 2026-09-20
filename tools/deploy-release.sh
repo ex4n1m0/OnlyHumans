@@ -42,11 +42,15 @@ npm version "$new" --no-git-tag-version --allow-same-version >/dev/null
 # means old and new builds never mix (the site tells users to update).
 # OH_KEEP_KEY=1 reuses the existing key (re-shipping / patching a release).
 if [ "${OH_KEEP_KEY:-0}" != "1" ]; then
-  if [ "$new" = "$cur" ] && [ "${OH_FORCE_NEW_KEY:-0}" != "1" ]; then
-    echo "deploy: refusing to mint a fresh channel key for the SAME version ($new)." >&2
-    echo "  Everyone already running $new would land in a split, dead universe." >&2
-    echo "  Re-ship $new with its existing key via OH_KEEP_KEY=1, or set" >&2
-    echo "  OH_FORCE_NEW_KEY=1 if you truly mean to cut a new universe unbumped." >&2
+  # The hazard is minting when the version being shipped is ALREADY in
+  # users' hands (source of truth: the site's version.json) — whether the
+  # bump came from this script or was set manually with OH_NO_BUMP=1.
+  shipped=$(node -p 'try{JSON.parse(require("fs").readFileSync(process.argv[1]+"/version.json","utf8")).version||""}catch{return ""}' "$OH_PUB" 2>/dev/null || true)
+  if [ -n "$shipped" ] && [ "$new" = "$shipped" ] && [ "${OH_FORCE_NEW_KEY:-0}" != "1" ]; then
+    echo "deploy: refusing to mint a fresh channel key for $new — that version is already shipped" >&2
+    echo "  (the site's version.json says $shipped). Everyone already running $new would" >&2
+    echo "  land in a split, dead universe. Re-ship with its existing key via OH_KEEP_KEY=1," >&2
+    echo "  or set OH_FORCE_NEW_KEY=1 if you truly mean to cut a new universe for it." >&2
     exit 1
   fi
   mkdir -p secrets

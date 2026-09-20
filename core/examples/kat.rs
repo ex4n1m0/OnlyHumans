@@ -33,7 +33,8 @@ fn main() {
     // Room key + host->guest delivery seal under the effective GK.
     let room_key: crypto::Key = Sha256::digest(b"kat-room-key").try_into().unwrap();
     let room_id: crypto::RoomId = hex::decode(&room_hex).unwrap().try_into().unwrap();
-    let key_ct = crypto::seal_room_key(&earth, &room_id, &peer_id, &room_key);
+    let key_ct_epoch: u64 = 1;
+    let key_ct = crypto::seal_room_key(&earth, &room_id, key_ct_epoch, &peer_id, &room_key);
 
     // A chat frame the portal must open with the delivered key.
     let rc = RoomCrypto::from_delivered(room_id, room_key);
@@ -56,6 +57,7 @@ fn main() {
             "room_key_hex": hex::encode(room_key),
             "proof_nonce_hex": hex::encode(nonce),
             "admission_proof_hex": hex::encode(proof),
+            "key_ct_epoch": key_ct_epoch,
             "key_ct_b64": crypto::base64_encode(&key_ct),
             "sealed": sealed,
             "chat_plaintext": "hello from rust",
