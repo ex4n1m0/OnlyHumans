@@ -550,24 +550,14 @@ function render() {
       <div class="gate">
         <div class="gate-inner">
           <img class="gate-logo" src="/icon-256.png" alt="">
-          <h2>Join a room from your browser</h2>
-          <p>Same sealed rooms as the desktop app — no install, no account.</p>
+          <h2>Every word is a room</h2>
           <div class="gaterow">
             <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false">
           </div>
           <div class="gaterow">
-            <button id="p-join" class="primary" type="button">Enter the room</button>
             <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false">
+            <button id="p-join" class="primary" type="button">Enter the room</button>
           </div>
-          <p class="gatenote">Every word is a room. <b>Earth</b> is the one
-          everyone meets in — the first person online creates it. Type your
-          own word and only people who use the same word can find you;
-          the word never leaves your device.</p>
-          <p class="gatenote">Everything you send travels end-to-end sealed
-          through the site's mailbox; delivery between a browser and a PC app
-          can take up to a couple of minutes while the app polls its mailbox.
-          Your key lives in this browser's storage — messages are kept for
-          this tab's session only; the desktop app keeps history.</p>
           <p class="gatehint" id="p-err"></p>
         </div>
       </div>`;
