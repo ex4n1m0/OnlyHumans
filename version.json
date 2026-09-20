@@ -2,13 +2,5 @@
   "version": "1.1.0",
   "date": "2026-09-20",
   "size": "5.5 MB",
-  "file": "/download/OnlyHumans-Setup-1.1.0.exe",
-  "linux": {
-    "version": "1.0.14",
-    "date": "2026-09-19",
-    "appimage": "/download/OnlyHumans_1.0.14_amd64.AppImage",
-    "appimageSize": "84 MB",
-    "deb": "/download/OnlyHumans_1.0.14_amd64.deb",
-    "debSize": "11"
-  }
+  "file": "/download/OnlyHumans-Setup-1.1.0.exe"
 }

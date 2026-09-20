@@ -17,7 +17,7 @@
 <link rel="apple-touch-icon" href="/icon-256.png">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication","name":"OnlyHumans",
-"operatingSystem":"Windows, Linux","applicationCategory":"CommunicationApplication",
+"operatingSystem":"Windows","applicationCategory":"CommunicationApplication",
 "offers":{"@type":"Offer","price":"0"}}
 </script>
 <style>
@@ -124,8 +124,6 @@
   a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
              box-shadow: none; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
-  .dl-portal { color: var(--teal); text-decoration: none; font-size: .92rem; font-weight: 600; }
-  .dl-portal:hover { text-decoration: underline; }
   .dl-note { font-size: .85rem; color: var(--muted); line-height: 1.6;
              margin-top: .5rem; }
 
@@ -214,6 +212,12 @@
   details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem;
                     padding: .35rem 0; }
   details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
+  table.lat { border-collapse: collapse; margin-top: .7rem; font-size: .88rem; }
+  table.lat th { text-align: left; color: var(--muted); font-weight: 600;
+                 padding: .25rem 1rem .25rem 0; border-bottom: 1px solid var(--line); }
+  table.lat td { color: #a9bcc4; padding: .3rem 1rem .3rem 0;
+                 border-bottom: 1px solid var(--line); line-height: 1.45; }
+  table.lat td:first-child { color: var(--teal); white-space: nowrap; }
 
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.6rem;
            text-align: center; font-size: .85rem; color: var(--muted); line-height: 1.7; }
@@ -280,21 +284,21 @@
             </svg>
             <span id="dl-label">Download for Windows</span>
           </a>
-          <a class="dl alt" id="dl-alt" href="/download/OnlyHumans_1.0.14_amd64.AppImage" download>
+          <a class="dl alt" href="/join">
             <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path d="M12 3v12m0 0 5-5m-5 5-5-5M4 21h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/>
+              <path d="M3 12h18M12 3c3 3.5 3 14.5 0 18-3-3.5-3-14.5 0-18Z" stroke="currentColor" stroke-width="2" fill="none"/>
             </svg>
-            <span id="dl-alt-label">Download for Linux</span>
+            <span>Join from your browser</span>
           </a>
         </div>
         <span class="dl-meta" id="dl-meta">v1.1.0 · 5.5 MB</span>
-        <span class="dl-meta" id="dl-alt-meta">v1.0.14 · AppImage 84 MB ·
-        <a id="dl-deb" href="/download/OnlyHumans_1.0.14_amd64.deb">.deb 11&nbsp;MB</a> (Debian/Ubuntu/Mint)</span>
-        <span class="dl-note">Install, pick any name, and you're in the room —
-        nothing to configure, no account to create. <b>Each version is its own room</b> — to meet people on the newest app, keep yours up to date from this page. Windows 10/11 and Linux
-        (AppImage for most 64-bit distros, make it executable; very old distros
-        may need a newer WebKitGTK — launch with
-        <code>WEBKIT_DISABLE_DMABUF_RENDERER=1</code> if no window appears).</span>
+        <span class="dl-note">Install, pick a name and a room word — Earth for
+        everyone, your own word for just your people. Nothing to configure,
+        no account to create. <b>Each version is its own room</b> — to meet
+        people on the newest app, keep yours up to date from this page.
+        Windows 10/11 today; Linux builds return once the Windows version
+        is fully polished.</span>
       </div>
     </div>
   </div>
@@ -331,10 +335,10 @@
       never a word it could read.</div>
     </div>
     <div class="stat">
-      <div class="n">3</div>
+      <div class="n">2</div>
       <div class="t">ways in, one protocol</div>
-      <div class="d">Windows and Linux apps — and now any browser — meet in
-      the same sealed rooms. No accounts, no invites: a name and a word.</div>
+      <div class="d">The Windows app and any browser meet in the same sealed
+      rooms. No accounts, no invites: a name and a word.</div>
     </div>
     <div class="stat">
       <div class="n">1</div>
@@ -465,10 +469,15 @@
   <details name="faq">
     <summary>Can I chat without installing anything?</summary>
     <p>Yes — <a href="/join">/join</a> is the browser portal. Same sealed
-    rooms, same words, no account. Messages between a browser and an app ride
-    the sealed site mailbox, so they can take a minute or two; app-to-app
-    traffic goes device to device. The portal keeps a session's messages
-    only — the app keeps history.</p>
+    rooms, same words (Earth is the public one), no account. The portal keeps
+    a session's messages only — the app keeps history.</p>
+    <table class="lat">
+      <tr><th>path</th><th>speed</th></tr>
+      <tr><td>app → app</td><td>instant — straight device to device</td></tr>
+      <tr><td>browser → browser</td><td>seconds — both poll the sealed mailbox</td></tr>
+      <tr><td>app → browser</td><td>~15–20 s — brief direct attempt, then the sealed mailbox</td></tr>
+      <tr><td>browser → app</td><td>up to ~2 min — the app checks its site mailbox every two minutes</td></tr>
+    </table>
   </details>
   <details name="faq">
     <summary>Does it work on my phone?</summary>
@@ -545,47 +554,17 @@
     });
   })();
 
-  // Version metadata + OS-aware download ordering.
+  // Version metadata (Windows is the focus; Linux returns later).
   (function () {
-    var ua = navigator.userAgent;
-    var isLinux = /Linux/.test(ua) && !/Android/.test(ua);
-    var isMac = /Macintosh/.test(ua);
     fetch("/version.json")
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (v) {
         if (!v) return;
-        var winMeta = ["v" + v.version];
-        if (v.size) winMeta.push(v.size);
-        if (v.date) winMeta.push("deployed " + new Date(v.date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }));
-        function setWin() {
-          document.getElementById("dl-label").textContent = "Download for Windows";
-          document.getElementById("dl-btn").href = v.file;
-          document.getElementById("dl-meta").textContent = winMeta.join(" · ");
-          document.getElementById("dl-alt").href = v.linux ? v.linux.appimage : "#";
-          document.getElementById("dl-alt-label").textContent = "Download for Linux";
-        }
-        function setLin() {
-          document.getElementById("dl-label").textContent = "Download for Linux";
-          document.getElementById("dl-btn").href = v.linux.appimage;
-          document.getElementById("dl-meta").textContent =
-            "v" + (v.linux.version || v.version) + " · AppImage " + (v.linux.appimageSize || "");
-          document.getElementById("dl-alt").href = v.file;
-          document.getElementById("dl-alt-label").textContent = "Download for Windows";
-        }
-        var altMeta = document.getElementById("dl-alt-meta");
-        var linuxLine = "v" + (v.linux.version || v.version) + " · AppImage " + (v.linux.appimageSize || "") +
-          " · <a href=\"" + (v.linux.deb || "#") + "\">.deb " + (v.linux.debSize || "") + "&nbsp;MB</a> (Debian/Ubuntu/Mint)";
-        if (v.linux) {
-          if (isLinux) { setLin(); } else { setWin(); }
-          altMeta.innerHTML = linuxLine;
-          if (isMac) {
-            altMeta.insertAdjacentHTML("afterbegin", "macOS isn't supported yet. ");
-          }
-        } else {
-          setWin();
-          document.getElementById("dl-alt").hidden = true;
-          altMeta.hidden = true;
-        }
+        var meta = ["v" + v.version];
+        if (v.size) meta.push(v.size);
+        if (v.date) meta.push("deployed " + new Date(v.date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }));
+        document.getElementById("dl-btn").href = v.file;
+        document.getElementById("dl-meta").textContent = meta.join(" · ");
         if (v.version) {
           document.getElementById("deploy-line").textContent =
             "site build " + v.version + " · " + v.date;
