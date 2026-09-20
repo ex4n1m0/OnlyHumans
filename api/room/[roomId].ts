@@ -1,6 +1,7 @@
 // GET /api/room/:roomId — fetch the current host record of a room.
 // Returns 404 when no live record exists (nobody hosts / TTL expired).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { rateLimitOk } from "../_rl";
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -16,6 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: "bad request" });
     return;
   }
+  if (!(await rateLimitOk(req, res, "roomget", 240, 60))) return;
   try {
     const r = await fetch(
       `${url.replace(/\/$/, "")}/get/${encodeURIComponent(`room:${roomId}`)}`,

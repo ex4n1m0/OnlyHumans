@@ -7,6 +7,7 @@
 // after 24h; each inbox keeps its last 32 items.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { ed25519Verify, libp2pEd25519Key, b64decode, mailCanonical } from "./_mail-crypto";
+import { rateLimitOk } from "./_rl";
 
 declare const process: { env: Record<string, string | undefined> };
 
@@ -54,6 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(405).json({ error: "method not allowed" });
     return;
   }
+  if (!(await rateLimitOk(req, res, "inbox", 90, 60))) return;
   const env = redisEnv();
   if (!env) {
     res.status(503).json({ error: "hub storage not configured" });

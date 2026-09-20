@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Join a room — OnlyHumans</title>
+<meta name="description" content="Join an OnlyHumans room from your browser: a name, a room word, and you're talking to the desktop apps — end-to-end sealed, no account.">
+<meta name="theme-color" content="#000000">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<style>
+  :root {
+    --teal: #17a2b8; --teal-deep: #0d6e79; --teal-dim: #0c2f37;
+    --bg: #000000; --panel: #14202a; --line: #1f3038;
+    --ink: #d8e4e8; --muted: #8fa6b0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { font-size: clamp(16px, 3px + 0.68vw, 26px); }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--ink); min-height: 100svh; }
+  #app { min-height: 100svh; display: flex; flex-direction: column; }
+
+  /* gate */
+  .pgate { margin: auto; display: flex; flex-direction: column; align-items: center;
+           text-align: center; padding: 3rem 1.5rem; max-width: 60ch; }
+  .pgate img { border-radius: 23%; box-shadow: 0 24px 96px rgba(23,162,184,.32); }
+  .pgate h1 { color: #fff; font-size: clamp(1.6rem, 1.2rem + 1.2vw, 2.6rem); margin: 1.4rem 0 .6rem; }
+  .pgate .sub { color: #a9bcc4; line-height: 1.6; margin-bottom: 1.6rem; }
+  .row { display: flex; gap: .6rem; width: min(420px, 100%); margin: .4rem 0; justify-content: center; }
+  .row input { flex: 1; background: var(--panel); border: 1px solid var(--line); color: var(--ink);
+               border-radius: 8px; padding: .6rem .9rem; font-size: 1rem; }
+  .row input:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .row button { background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+                border-radius: 8px; padding: .6rem 1rem; cursor: pointer; font-size: .95rem; }
+  .row button.primary, #p-join { background: linear-gradient(135deg, var(--teal), var(--teal-deep));
+                color: #fff; border: none; font-weight: 600; padding: .7rem 1.6rem; border-radius: 8px;
+                box-shadow: 0 6px 24px rgba(23,162,184,.25); }
+  .err { color: #ff9d9d; min-height: 1.2em; margin-top: .6rem; }
+  .fine { color: var(--muted); font-size: .8rem; margin-top: 1.2rem; line-height: 1.5; max-width: 46ch; }
+
+  /* chat */
+  header { display: flex; align-items: center; gap: .8rem; padding: .8rem 1.2rem;
+           border-bottom: 1px solid var(--line); background: rgba(0,0,0,.92); position: sticky; top: 0; }
+  header img { border-radius: 6px; }
+  .hd .t { color: #fff; font-weight: 700; }
+  .pill { font-size: .7rem; font-weight: 600; color: var(--teal); border: 1px solid var(--teal-deep);
+          border-radius: 999px; padding: .1rem .5rem; margin-left: .3rem; vertical-align: middle; }
+  .hd .s { color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+  .on { color: #22c55e; }
+  .msgs { flex: 1; overflow-y: auto; padding: 1.2rem; display: flex; flex-direction: column;
+          gap: .8rem; max-width: 900px; width: 100%; margin: 0 auto; }
+  .status { color: var(--teal); font-size: .85rem; text-align: center; padding: 1rem; }
+  .m { max-width: 72%; }
+  .m .who { font-size: .78rem; color: var(--muted); margin-bottom: .15rem; }
+  .m .b { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: .55rem .8rem; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap; }
+  .m.out { align-self: flex-end; }
+  .m.out .b { background: var(--teal-dim); border-color: var(--teal-deep); }
+  .m .meta { font-size: .7rem; color: var(--muted); margin-top: .2rem; }
+  .composer { display: flex; gap: .6rem; padding: 1rem 1.2rem 1.4rem; border-top: 1px solid var(--line);
+              max-width: 900px; width: 100%; margin: 0 auto; }
+  .composer textarea { flex: 1; resize: none; background: var(--panel); border: 1px solid var(--line);
+              color: var(--ink); border-radius: 8px; padding: .6rem .9rem; font: inherit; }
+  .composer textarea:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/join-assets/portal.js"></script>
+</body>
+</html>

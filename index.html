@@ -124,6 +124,8 @@
   a.dl.alt { background: var(--panel); border: 1px solid var(--teal-deep); color: var(--teal);
              box-shadow: none; }
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+  .dl-portal { color: var(--teal); text-decoration: none; font-size: .92rem; font-weight: 600; }
+  .dl-portal:hover { text-decoration: underline; }
   .dl-note { font-size: .85rem; color: var(--muted); line-height: 1.6;
              margin-top: .5rem; }
 
@@ -260,7 +262,8 @@
     <div class="hero-copy">
       <img class="hero-logo" src="/logo.png" alt="OnlyHumans logo" width="1254" height="1254">
       <h1>Chat that never passes through <em>a server</em>.</h1>
-      <p class="lead">One room. Everyone who opens the app is in it. Messages
+      <p class="lead">Every room is a word. Earth is the room everyone
+      meets in; your own word is a room only your people can find. Messages
       travel straight between devices, sealed end-to-end —<br>
       this site only ever holds signed, expiring addresses so peers can find each other.</p>
 
@@ -328,16 +331,17 @@
       never a word it could read.</div>
     </div>
     <div class="stat">
-      <div class="n">2</div>
-      <div class="t">platforms, one room</div>
-      <div class="d">Windows and Linux installers land everyone in the same
-      encrypted room — no accounts, no invites to configure, just a name.</div>
+      <div class="n">3</div>
+      <div class="t">ways in, one protocol</div>
+      <div class="d">Windows and Linux apps — and now any browser — meet in
+      the same sealed rooms. No accounts, no invites: a name and a word.</div>
     </div>
     <div class="stat">
       <div class="n">1</div>
-      <div class="t">shared key gates the door</div>
-      <div class="d">A community key embedded in the installer decides who can
-      enter. Rotate the room key and the door closes behind you, forever.</div>
+      <div class="t">word gates the door</div>
+      <div class="d">Your room word is stretched into every key — the site's
+      base key alone admits no one. Rotate the room key and the door closes
+      behind you, forever.</div>
     </div>
   </div>
 
@@ -407,6 +411,7 @@
       <li>A compromised device: malware on your machine can read your screen</li>
       <li>Guessable code words: a code room is isolation from strangers, not access control — pick unguessable words</li>
       <li>Global traffic analysis: metadata-resistant routing is not implemented</li>
+      <li>Browser clients: the /join portal keeps your key in browser storage — weaker than the signed app's. Fine for casual rooms; use the app for serious ones</li>
     </ul>
   </div>
   </div>
@@ -431,16 +436,18 @@
     connected keep talking, and the site has no messages to lose.</p>
   </details>
   <details name="faq">
-    <summary>Who can join the main room?</summary>
-    <p>Anyone holding the installer — the community key inside it is the
-    ticket. The room host can rotate the key at any moment, which closes the
-    room to newcomers forever.</p>
+    <summary>Who can join Earth?</summary>
+    <p>Anyone with the app — or a browser at /join. The first person online
+    creates Earth and hosts it; the host can rotate the key at any moment,
+    which closes the room to newcomers forever.</p>
   </details>
   <details name="faq">
-    <summary>What's a code room?</summary>
-    <p>Type a word at the door and you're in a parallel room with everyone who
-    types the same word. The word is never transmitted — each device derives
-    the same room from it. Great for "just us"; pick unguessable words.</p>
+    <summary>What's a word room?</summary>
+    <p>Type a word at the door and you're in a room with everyone who types
+    the same word. The word never leaves your device — each machine derives
+    the same room from it, stretched through a memory-hard key function so
+    guessing is expensive. Roll a generated phrase for private rooms; Earth
+    is the public one.</p>
   </details>
   <details name="faq">
     <summary>Someone was offline when I sent a message. Is it lost?</summary>
@@ -456,9 +463,17 @@
     among themselves.</p>
   </details>
   <details name="faq">
+    <summary>Can I chat without installing anything?</summary>
+    <p>Yes — <a href="/join">/join</a> is the browser portal. Same sealed
+    rooms, same words, no account. Messages between a browser and an app ride
+    the sealed site mailbox, so they can take a minute or two; app-to-app
+    traffic goes device to device. The portal keeps a session's messages
+    only — the app keeps history.</p>
+  </details>
+  <details name="faq">
     <summary>Does it work on my phone?</summary>
-    <p>Not yet — Windows and Linux today, Android is planned. The desktop UI
-    is already designed to adapt.</p>
+    <p>From any browser, yes — open <a href="/join">/join</a>. A native
+    Android app is still planned.</p>
   </details>
   </div>
 
