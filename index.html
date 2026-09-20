@@ -514,10 +514,17 @@
           var n = j.online, word = n === 1 ? "human" : "humans";
           document.getElementById("live-count").textContent = String(n);
           document.getElementById("live-word").textContent = word;
+          // rooms = rooms with a live host right now (a bare count — the
+          // hub answers "how many", never "which").
+          var rooms = typeof j.rooms === "number" ? j.rooms : 0;
+          var roomBit = rooms > 0
+            ? " · <b>" + rooms + "</b> " + (rooms === 1 ? "room" : "rooms") + " live"
+            : "";
           if (n === 0) {
-            t.textContent = "The room is empty right now — be the first";
+            t.innerHTML = "No one is in a room right now — be the first" + roomBit;
           } else {
-            t.innerHTML = "<b>" + n + "</b> " + word + " in the room right now";
+            t.innerHTML = "<b>" + n + "</b> " + word +
+              (n === 1 ? " in a room right now" : " in the rooms right now") + roomBit;
           }
           pill.hidden = false;
           hero.hidden = false;

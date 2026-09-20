@@ -46,18 +46,45 @@ function pruneAndCount(): Promise<number> {
   ]).then((res) => Number(res[1]?.result ?? 0));
 }
 
+// Live rooms: the room:<id> host pointers room.ts keeps (TTL 300s, the
+// hosting app refreshes them). Like the presence counter this answers
+// "how many", never "which" — the scan reads the ids but only the count
+// leaves the hub. SCAN may revisit a key across pages, so dedupe before
+// counting.
+async function countLiveRooms(): Promise<number> {
+  let cursor = "0";
+  const seen = new Set<string>();
+  for (;;) {
+    const page = await redisPipe([["scan", cursor, "match", "room:*", "count", 1000]])
+      .then((res) => res[0]?.result);
+    if (!Array.isArray(page) || !Array.isArray(page[1])) {
+      throw new Error("upstash scan: unexpected body");
+    }
+    cursor = String(page[0]);
+    for (const k of page[1]) seen.add(String(k));
+    if (cursor === "0") return seen.size;
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const env = redisEnv();
   if (!env) {
     res.status(503).json({ error: "hub storage not configured" });
     return;
   }
-  // The public counter: just a number, nothing else.
+  // The public counter: just numbers, nothing else. The room count is
+  // strictly additive — if its scan fails we still answer {online}.
   if (req.method === "GET") {
     try {
       const online = await pruneAndCount();
+      let rooms: number | undefined;
+      try {
+        rooms = await countLiveRooms();
+      } catch {
+        // fall through without rooms rather than break the human counter
+      }
       res.setHeader("Cache-Control", "no-store");
-      res.status(200).json({ online });
+      res.status(200).json(rooms === undefined ? { online } : { online, rooms });
     } catch (e: any) {
       res.status(500).json({ error: "redis failed", detail: String(e?.message ?? e) });
     }
