@@ -296,21 +296,23 @@ export class Hub {
     await this.mailPushBatch(peerId, pubB64, sign, envelopes.map((env) => ({ to, env })));
   }
 
-  // The hub throttles per SENDER (one push every few seconds), so every
-  // fan-out MUST ship as a single request carrying all recipients.
+  // The hub throttles per SENDER (one push every few seconds) and caps a
+  // push at 16 items, so every fan-out ships as chunked single requests
+  // carrying all recipients.
   async mailPushBatch(peerId: string, pubB64: string, sign: (m: Uint8Array) => Uint8Array, batch: Array<{ to: string; env: Envelope }>): Promise<void> {
-    if (!batch.length) return;
-    const items: MailItem[] = batch.map(({ to, env }) => {
-      const env_json = JSON.stringify(env);
-      const ts = Date.now();
-      return { to, from: peerId, public_key_b64: pubB64, env_json, ts_ms: ts, sig_b64: b64(sign(mailCanonical(peerId, to, ts, env_json))) };
-    });
-    const r = await fetch(`${this.base}/api/inbox`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ items }),
-    });
-    if (!r.ok) throw new Error(`mail push failed: ${r.status}`);
+    for (let i = 0; i < batch.length; i += 16) {
+      const items: MailItem[] = batch.slice(i, i + 16).map(({ to, env }) => {
+        const env_json = JSON.stringify(env);
+        const ts = Date.now();
+        return { to, from: peerId, public_key_b64: pubB64, env_json, ts_ms: ts, sig_b64: b64(sign(mailCanonical(peerId, to, ts, env_json))) };
+      });
+      const r = await fetch(`${this.base}/api/inbox`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ items }),
+      });
+      if (!r.ok) throw new Error(`mail push failed: ${r.status}`);
+    }
   }
 
   async mailDrain(peerId: string, sign: (m: Uint8Array) => Uint8Array): Promise<MailItem[]> {

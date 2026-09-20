@@ -1,10 +1,15 @@
 // PUT /api/room — publish who currently hosts a room.
-// First writer wins (stored with NX): that is the "first to join creates
-// the room" election. The host refreshes this record alongside its address
-// registration; records expire (TTL 300s) so a dead host's pointer clears.
+// First writer wins (NX): that is the "first to join creates the room"
+// election. The record's CURRENT host may refresh (plain overwrite of its
+// own record) alongside its address registration — hosts retry every
+// ~120s while records live 300s, so without the refresh every room's
+// pointer would lapse 5 minutes after founding and a joiner in the gap
+// would fork the room under a new key. Records still expire (TTL 300s)
+// so a dead host's pointer clears.
 // Node-style handler + plain fetch to Upstash REST (no SDK).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createPublicKey, verify as nodeVerify } from "node:crypto";
+import { peerIdFromLibp2pKey } from "./_mail-crypto";
 
 function ed25519Verify(sig: Uint8Array, msg: Uint8Array, rawPub: Uint8Array): boolean {
   const spki = Buffer.alloc(44);
@@ -146,25 +151,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   let ok = false;
+  let derivedHost: string | null = null;
   try {
-    const pubRaw = libp2pEd25519Key(b64decode(pubB64));
+    const pubProto = b64decode(pubB64);
+    const pubRaw = libp2pEd25519Key(pubProto);
     const sig = b64decode(sigB64);
     if (pubRaw && sig.length === 64) {
       ok = ed25519Verify(sig, canonical(roomId, hostPeerId, pubB64, ts), pubRaw);
+      if (ok) derivedHost = peerIdFromLibp2pKey(pubProto);
     }
   } catch {
     ok = false;
   }
-  if (!ok) {
-    res.status(403).json({ error: "signature verification failed" });
+  // The signature only proves control of the included key; without this
+  // binding anyone could claim any host_peer_id (e.g. "refresh" a live
+  // record they do not own by naming its host and signing with their own
+  // key — pinning a dead host's pointer forever and blocking takeover).
+  if (!ok || derivedHost !== hostPeerId) {
+    res.status(403).json({ error: "signature verification failed (key does not derive host peer id)" });
     return;
   }
+  const record = { room_id: roomId, host_peer_id: hostPeerId, host_public_key_b64: pubB64, ts_ms: ts, sig_b64: sigB64 };
   try {
-    // First-writer-wins election: NX refuses if a live record exists.
-    const won = await redisSet(`room:${roomId}`, JSON.stringify(req.body), { ex: 300, nx: true });
+    // First-writer-wins election for a NEW host: NX refuses if a live
+    // record exists. The CURRENT host refreshes with a plain SET (extend
+    // the TTL) — but only when BOTH the host id and the host key match the
+    // live record, so the identity key is the refresh credential. The
+    // GET→SET has a milliseconds-wide race if the old record expires
+    // underneath a refresh and a new host claims in between — the loser
+    // then sees a 409 or yields to the live record exactly as clients
+    // already do.
+    const existing = await redisGet(`room:${roomId}`);
+    let mine = false;
+    if (existing !== null) {
+      try {
+        const cur = JSON.parse(existing) as { host_peer_id?: string; host_public_key_b64?: string };
+        mine = cur.host_peer_id === hostPeerId && cur.host_public_key_b64 === pubB64;
+      } catch {
+        mine = false;
+      }
+    }
+    const won = await redisSet(`room:${roomId}`, JSON.stringify(record), { ex: 300, nx: !mine });
     if (!won) {
-      const existing = await redisGet(`room:${roomId}`);
-      res.status(409).json({ error: "room already hosted", record: existing && JSON.parse(existing) });
+      const current = existing ?? (await redisGet(`room:${roomId}`));
+      res.status(409).json({ error: "room already hosted", record: current && JSON.parse(current) });
       return;
     }
     res.status(200).json({ ok: true });

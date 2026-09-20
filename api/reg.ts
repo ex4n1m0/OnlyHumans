@@ -4,6 +4,7 @@
 // Node-style handler + plain fetch to Upstash REST (no SDK).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createPublicKey, verify as nodeVerify } from "node:crypto";
+import { peerIdFromLibp2pKey } from "./_mail-crypto";
 
 // Ed25519 verify with zero dependencies: wrap the raw 32-byte public key
 // in a fixed SPKI prefix and use Node's built-in crypto.
@@ -137,17 +138,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   let ok = false;
+  let derived: string | null = null;
   try {
-    const pubRaw = libp2pEd25519Key(b64decode(pubB64));
+    const pubProto = b64decode(pubB64);
+    const pubRaw = libp2pEd25519Key(pubProto);
     const sig = b64decode(sigB64);
     if (pubRaw && sig.length === 64) {
       ok = ed25519Verify(sig, canonical(peerId, pubB64, addrs, ts), pubRaw);
+      if (ok) derived = peerIdFromLibp2pKey(pubProto);
     }
   } catch {
     ok = false;
   }
-  if (!ok) {
-    res.status(403).json({ error: "signature verification failed" });
+  // Bind the registration to the signer: without this, anyone could
+  // publish addresses under another peer's id and redirect dials.
+  if (!ok || derived !== peerId) {
+    res.status(403).json({ error: "signature verification failed (key does not derive peer id)" });
     return;
   }
   try {

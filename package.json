@@ -11,5 +11,9 @@
   "devDependencies": {
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "build:portal": "esbuild portal/portal.ts --bundle --format=esm --outfile=portal/portal.js && esbuild portal/app.ts --bundle --minify --format=iife --outfile=join-assets/portal.js",
+    "test:kat": "esbuild portal/kat-test.ts --bundle --format=esm --platform=node --outfile=.kat-test.mjs && node .kat-test.mjs"
   }
 }

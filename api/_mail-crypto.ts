@@ -86,3 +86,27 @@ export function mailCanonical(from: string, to: string, ts: number, envJson: str
 export function drainCanonical(peer: string, ts: number): Uint8Array {
   return new TextEncoder().encode(`OH1-drain-v1|${peer}|${ts}`);
 }
+
+// libp2p PeerId of an Ed25519 PublicKey protobuf: base58btc of the
+// identity multihash (0x00 <len> <protobuf>). Mirrors portal.ts
+// peerIdFromPublic so endpoints can require that the included key derives
+// the claimed peer/host id — a signature alone does not bind the two.
+const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+export function peerIdFromLibp2pKey(pubProtobuf: Uint8Array): string {
+  const mh = new Uint8Array(2 + pubProtobuf.length);
+  mh[0] = 0x00; // identity multihash
+  mh[1] = pubProtobuf.length;
+  mh.set(pubProtobuf, 2);
+  let n = 0n;
+  for (const b of mh) n = n * 256n + BigInt(b);
+  let out = "";
+  while (n > 0n) {
+    out = B58_ALPHABET[Number(n % 58n)] + out;
+    n /= 58n;
+  }
+  for (const b of mh) {
+    if (b !== 0) break;
+    out = "1" + out;
+  }
+  return out;
+}

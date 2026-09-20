@@ -1,0 +1,12 @@
+# This checkout is not a git repository, so Vercel CLI ignores .gitignore
+# here and would upload everything. Keep credentials and dev-only files
+# off the public deployment explicitly.
+.env*
+.env.local
+.e2e.mjs
+.kat-test.mjs
+.zcodeignore
+.zcode/
+.vercel/
+node_modules/
+portal/
