@@ -872,7 +872,6 @@ function render() {
         label: "Log off",
         hint: "back to the join screen — your key stays in this browser",
         act: () => {
-          localStorage.removeItem("oh-portal-name");
           view = "gate";
           render();
           const n = $("p-name") as HTMLInputElement | null;
@@ -935,7 +934,6 @@ async function doJoin() {
   const err = $("p-err")!;
   if (!name) { err.textContent = "A name is required."; return; }
   err.textContent = "";
-  localStorage.setItem("oh-portal-name", name);
   // The chat shell renders before portal.join() runs; seed the fields its
   // first paint reads so the room name and word are right immediately.
   portal.name = name;
@@ -951,7 +949,8 @@ async function doJoin() {
   }
 }
 
-const saved = localStorage.getItem("oh-portal-name");
+// The name is never remembered between visits — every load starts with a
+// clean gate. removeItem also scrubs what older builds persisted.
+localStorage.removeItem("oh-portal-name");
 render();
 portal.prefetch();
-if (saved) { const n = $("p-name") as HTMLInputElement | null; if (n) n.value = saved; }
