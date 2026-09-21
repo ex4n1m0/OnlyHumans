@@ -758,7 +758,6 @@ function render() {
         </div>
       </div>`;
     const word = $("p-word") as HTMLInputElement;
-    word.value = "earth";
     $("p-join")?.addEventListener("click", () => void doJoin());
     ($("p-name") as HTMLInputElement).addEventListener("keydown", (e) => { if (e.key === "Enter") void doJoin(); });
     word.addEventListener("keydown", (e) => { if (e.key === "Enter") void doJoin(); });

@@ -18,7 +18,7 @@
           <p class="gatehint" id="p-err"></p>
           <p class="gatebuild">browser portal \xB7 build ${Fo}</p>
         </div>
-      </div>`;let f=W("p-word");f.value="earth",W("p-join")?.addEventListener("click",()=>{pr()}),W("p-name").addEventListener("keydown",h=>{h.key==="Enter"&&pr()}),f.addEventListener("keydown",h=>{h.key==="Enter"&&pr()});return}let e=W("p-send"),n=e?{value:e.value,focused:document.activeElement===e}:null,i=T.peerId||"",r=[...T.members].filter(([f])=>f!==i),o=T.members.size||1;t.innerHTML=`
+      </div>`;let f=W("p-word");W("p-join")?.addEventListener("click",()=>{pr()}),W("p-name").addEventListener("keydown",h=>{h.key==="Enter"&&pr()}),f.addEventListener("keydown",h=>{h.key==="Enter"&&pr()});return}let e=W("p-send"),n=e?{value:e.value,focused:document.activeElement===e}:null,i=T.peerId||"",r=[...T.members].filter(([f])=>f!==i),o=T.members.size||1;t.innerHTML=`
     <header class="cmdbar">
       <img class="brandlogo" src="/icon-256.png" alt="">
       <span class="logo">OnlyHumans</span>
