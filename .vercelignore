@@ -4,11 +4,16 @@
 .env*
 .env.local
 .e2e.mjs
+.e2e-host.mjs
 .kat-test.mjs
 .zcodeignore
 .zcode/
 .vercel/
 node_modules/
 portal/
+# The GK ships only through the /api/gk function (env-backed); the local
+# gk.json is dev-only (local-portal-server) and must stay off prod —
+# a stale static copy would shadow a future key rotation.
+gk.json
 # README-only assets (referenced from GitHub, not from any served page).
 screenshots/

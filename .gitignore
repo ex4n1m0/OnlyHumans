@@ -11,6 +11,7 @@ gk.json
 # Release artifacts and dev/working files never belong in git. (download/
 # stays tracked: the git-pushed tree serves the installers.)
 .e2e.mjs
+.e2e-host.mjs
 .kat-test.mjs
 .zcodeignore
 .zcode/

@@ -18,7 +18,40 @@ const KIND = {
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
+/// Build id = the content hash in this bundle's own script URL. The
+/// shipped file is the single source of truth, so the UI can never show
+/// a stale version after `npm run build:portal` mints a new bundle.
+const BUILD = (() => {
+  const src = (document.currentScript as HTMLScriptElement | null)?.src ?? "";
+  return /portal-([A-Za-z0-9]+)\.js/.exec(src)?.[1] ?? "dev";
+})();
+
+/// Local-only browser label parsed from the UA — nothing is sent or
+/// stored anywhere (the site stays identity-free). Answers "which
+/// browser is this?" during support without server-side tracking.
+const BROWSER = (() => {
+  const ua = navigator.userAgent;
+  const m = (re: RegExp) => re.exec(ua)?.[1];
+  const ios = /iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const os = ios ? `iOS ${m(/OS (\d+[._]\d+)/)?.replace("_", ".") ?? "?"}`
+    : m(/Android (\d+)/) ? `Android ${m(/Android (\d+)/)}`
+    : /Windows/.test(ua) ? "Windows"
+    : /Macintosh/.test(ua) ? "macOS" : "unknown OS";
+  const name = m(/Edg\/(\d+)/) ? `Edge ${m(/Edg\/(\d+)/)}`
+    : m(/CriOS\/(\d+)/) ? `Chrome ${m(/CriOS\/(\d+)/)}`
+    : m(/FxiOS\/(\d+)/) ? `Firefox ${m(/FxiOS\/(\d+)/)}`
+    : m(/Chrome\/(\d+)/) ? `Chrome ${m(/Chrome\/(\d+)/)}`
+    : m(/Firefox\/(\d+)/) ? `Firefox ${m(/Firefox\/(\d+)/)}`
+    : m(/Version\/(\d+).*Safari/) ? `Safari ${m(/Version\/(\d+)/)}` : "unknown browser";
+  return `${name} · ${os}`;
+})();
+
 interface Msg { ts: number; sender: string; name: string; body: string; out: boolean }
+
+/** One line of the connection log — every discovery/seating attempt the
+ *  tab makes, so two clients that can't see each other are debuggable at
+ *  a glance instead of staring at a spinner. */
+interface ConnEvent { ts: number; text: string; kind: "try" | "ok" | "warn" }
 
 class Portal {
   hub = new Hub("");
@@ -45,6 +78,31 @@ class Portal {
   presenceToken = hex(crypto.getRandomValues(new Uint8Array(16)));
   online = 0;
   status = "starting…";
+  /// Connection log + attempt bookkeeping, rendered live while we hold
+  /// no seat. See ConnEvent.
+  events: ConnEvent[] = [];
+  seatAttempts = 0;
+  lastJoinMailAt = 0;
+  lastFoundTry = 0;
+  lastRegAt = 0;
+  lastBeatAt = 0;
+  lastRefreshAt = 0;
+  loopStarted = false;
+  /// Last hub contact verdict: null = never checked. Drives the site
+  /// chip and the "site not answering" log line on transitions.
+  siteOk: boolean | null = null;
+
+  logConn(text: string, kind: ConnEvent["kind"] = "try") {
+    this.events.push({ ts: Date.now(), text, kind });
+    if (this.events.length > 40) this.events.shift();
+    render();
+  }
+
+  noteSite(ok: boolean) {
+    if (this.siteOk === ok) return;
+    this.siteOk = ok;
+    this.logConn(ok ? "the site answered" : "the site is not answering — retrying", ok ? "ok" : "warn");
+  }
 
   get sign() { return (m: Uint8Array) => ed25519.sign(m, this.seed); }
 
@@ -110,31 +168,47 @@ class Portal {
     this.egk = await this.stretch(word);
     this.roomHex = globalRoomHex(this.egk);
     setStatus("registering with the site…");
-    // Publishing our address and reading the room pointer are independent —
-    // ship them as one round-trip instead of two sequential awaits.
-    const [, rec] = await Promise.all([
-      this.hub.reg(this.peerId, this.pubB64, this.sign),
-      this.hub.lookupRoom(this.roomHex),
-    ]);
+    // Best-effort first contact. A transient failure here (flaky cellular,
+    // a refused request) must not bounce the user back to the gate: the
+    // tab stays unseated and the connection loop retries aggressively.
+    // Publishing our address and reading the room pointer are independent
+    // — ship them as one round-trip instead of two sequential awaits.
+    let rec: { host_peer_id: string } | null = null;
+    try {
+      const [, r] = await Promise.all([
+        this.hub.reg(this.peerId, this.pubB64, this.sign).catch(() => {}),
+        this.hub.lookupRoom(this.roomHex),
+      ]);
+      rec = r;
+      this.lastRegAt = Date.now();
+      this.noteSite(true);
+    } catch {
+      this.noteSite(false);
+      this.logConn("first contact with the site failed — the connection loop takes over", "warn");
+    }
     void this.beat();
-    if (rec && rec.host_peer_id === this.peerId) {
-      // Our own record survived a page refresh (key was memory-only and is
-      // gone): re-claim it and mint a fresh room — members converge back
-      // through their own re-discovery.
-      await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
-      this.found();
-    } else if (rec) {
-      this.seekSeat(rec.host_peer_id);
-    } else {
-      const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
-      if (won) {
+    try {
+      if (rec && rec.host_peer_id === this.peerId) {
+        // Our own record survived a page refresh (key was memory-only and
+        // is gone): re-claim it and mint a fresh room — members converge
+        // back through their own re-discovery.
+        await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
         this.found();
+      } else if (rec) {
+        this.seekSeat(rec.host_peer_id);
       } else {
-        const again = await this.hub.lookupRoom(this.roomHex);
-        if (again && again.host_peer_id !== this.peerId) {
-          this.seekSeat(again.host_peer_id);
+        const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
+        if (won) {
+          this.found();
+        } else {
+          const again = await this.hub.lookupRoom(this.roomHex);
+          if (again && again.host_peer_id !== this.peerId) {
+            this.seekSeat(again.host_peer_id);
+          }
         }
       }
+    } catch {
+      this.logConn("could not finish joining — retrying in the background", "warn");
     }
     this.loop();
   }
@@ -146,7 +220,9 @@ class Portal {
     this.hostId = this.peerId;
     this.room = new RoomCrypto(unhex(this.roomHex), 1, crypto.getRandomValues(new Uint8Array(32)));
     this.members = new Map([[this.peerId, this.name]]);
-    setStatus("you created this room — the first person with the same word joins through the site");
+    this.lastRefreshAt = Date.now();
+    this.seatAttempts = 0;
+    this.logConn("this tab created the room and is holding it open", "ok");
     this.ready();
   }
 
@@ -156,56 +232,119 @@ class Portal {
   seekSeat(host: string) {
     this.isHost = false;
     this.hostId = host;
-    setStatus("asking the host for a seat — delivery through the site can take up to a minute…");
+    this.seatAttempts++;
+    this.lastJoinMailAt = Date.now();
+    setStatus(`asking host ${host.slice(0, 8)}… for a seat (attempt ${this.seatAttempts}) — their tab must be open`);
+    this.logConn(`seat request #${this.seatAttempts} mailed to host ${host.slice(0, 8)}…`);
     void this.hub.mailPush(this.peerId, this.pubB64, this.sign, host, [buildJoin(this.roomHex, this.peerId, this.name, this.egk)])
-      .catch(() => {});
+      .catch(() => this.logConn("the site refused the seat request — retrying", "warn"));
   }
 
   /// While we hold no room (host died, Join lost to the 32-item inbox cap,
-  /// page refreshed): re-run discovery and re-ask until seated.
+  /// page refreshed): re-run discovery and re-ask until seated. Runs on
+  /// the fast connection tick — a phone tab that slept through its host's
+  /// reply reconnects in seconds, not at the next 2-minute mark.
   async retryJoin() {
+    if (!this.roomHex || !this.egk) return;
     let rec;
-    try { rec = await this.hub.lookupRoom(this.roomHex); } catch { return; }
+    try { rec = await this.hub.lookupRoom(this.roomHex); }
+    catch { this.noteSite(false); return; }
+    this.noteSite(true);
     try {
       if (!rec) {
+        if (Date.now() - this.lastFoundTry < 10_000) return;
+        this.lastFoundTry = Date.now();
+        this.logConn("no host on the site — claiming the room");
         const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
         if (won) this.found();
         return;
       }
       if (rec.host_peer_id === this.peerId) {
+        if (Date.now() - this.lastFoundTry < 10_000) return;
+        this.lastFoundTry = Date.now();
         await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
         this.found();
         return;
       }
-      this.seekSeat(rec.host_peer_id);
+      // A new host, or a re-nudge for the same one — the join mail sits
+      // in their inbox for 24h, but a fresh one also survives a crowded
+      // inbox (only the last 32 items are kept).
+      if (rec.host_peer_id !== this.hostId || Date.now() - this.lastJoinMailAt > 15_000) {
+        this.seekSeat(rec.host_peer_id);
+      }
     } catch { /* retry next cycle */ }
   }
 
   ready() { this.status = ""; render(); }
 
   async beat() {
-    try { this.online = await this.hub.presence(this.presenceToken); } catch { /* offline hub */ }
+    this.lastBeatAt = Date.now();
+    try {
+      this.online = await this.hub.presence(this.presenceToken);
+      this.siteOk = true;
+    } catch {
+      this.siteOk = false; // network-level failure (a refused/429 response still means "up")
+      this.online = 0;
+    }
   }
 
   loop() {
-    // First poll right away — a seat delivery used to wait out the whole
-    // first tick — and poll faster while we still hold no room key.
+    // A log-off → re-join cycle would stack a second set of timers and
+    // wake listeners on the same tab; the guards inside each pass make
+    // that harmless, but one loop is the contract.
+    if (this.loopStarted) return;
+    this.loopStarted = true;
+    // Mail drain: the hot path — incoming keys, chat, member frames.
     void this.drain();
     const drainTick = () => {
       void this.drain().catch(() => {}).then(() => setTimeout(drainTick, this.room ? 3500 : 2000));
     };
     setTimeout(drainTick, this.room ? 3500 : 2000);
-    setInterval(() => {
+
+    // Connection tick: discovery / seat-seeking / host refresh every 5s
+    // (each action is internally throttled to respect the hub's limits).
+    const connTick = () => {
+      void this.cycle().catch(() => {}).then(() => setTimeout(connTick, 5000));
+    };
+    setTimeout(connTick, 2000);
+
+    // Phones suspend background tabs mid-tick — timers freeze for minutes.
+    // The moment this tab is visible again (or the network returns), run a
+    // full cycle NOW instead of waiting out the 5s/45s timers above.
+    const wake = () => {
+      if (document.visibilityState !== "visible") return;
+      void this.drain().catch(() => {});
+      void this.cycle().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    window.addEventListener("focus", wake);
+  }
+
+  /// One connection-maintenance pass. Separate from drain() so wake
+  /// events can run it immediately.
+  async cycle() {
+    if (!this.room) {
+      await this.retryJoin();
+    } else if (this.isHost) {
+      // Room records live 300s on the hub; refresh at 45s so a phone
+      // throttling our timers still keeps the room findable, and a
+      // dead-host pointer clears fast once we are really gone.
+      if (Date.now() - this.lastRefreshAt > 45_000) await this.hostRefresh();
+    } else if (Date.now() - this.lastHostContact > 45_000) {
+      await this.rediscover();
+    }
+    // Address registration + presence counter piggyback here. The hub
+    // throttles both to one per 30s per peer/token — the 31s guard
+    // stays on the good side of that (except the fast beat retry
+    // while the site looks down, which the endpoint cheaply refuses).
+    if (Date.now() - this.lastRegAt > 31_000) {
+      this.lastRegAt = Date.now();
       void this.hub.reg(this.peerId, this.pubB64, this.sign).catch(() => {});
+    }
+    if (Date.now() - this.lastBeatAt > 31_000 || this.siteOk === false) {
       void this.beat();
-      if (this.isHost) {
-        void this.hostRefresh();
-      } else if (this.room) {
-        void this.rediscover();
-      } else {
-        void this.retryJoin();
-      }
-    }, 120_000);
+    }
   }
 
   /// Hosts keep the room record alive (the hub lets the current host
@@ -214,15 +353,18 @@ class Portal {
   /// live record — we stay a member with our key; rediscover() handles
   /// re-seating us on the new host if needed.
   async hostRefresh() {
+    this.lastRefreshAt = Date.now();
     try {
       const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
+      this.noteSite(true);
       if (won) return;
       const rec = await this.hub.lookupRoom(this.roomHex);
       if (rec && rec.host_peer_id !== this.peerId) {
         this.isHost = false;
+        this.logConn("another tab holds the room now — switching to a seat", "warn");
         this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· another live host holds the room", out: false });
       }
-    } catch { /* offline hub: retry next cycle */ }
+    } catch { this.noteSite(false); /* retry next cycle */ }
   }
 
   /// A member whose host vanished (tab closed, app gone past the record
@@ -233,14 +375,20 @@ class Portal {
   /// seat; the host's KeyDelivery restores the current key.
   async rediscover() {
     let rec;
-    try { rec = await this.hub.lookupRoom(this.roomHex); } catch { return; }
+    try { rec = await this.hub.lookupRoom(this.roomHex); }
+    catch { this.noteSite(false); return; }
+    this.noteSite(true);
     if (!rec) {
       try {
+        if (Date.now() - this.lastFoundTry < 10_000) return;
+        this.lastFoundTry = Date.now();
         const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
         if (won) {
           this.isHost = true; // keep our RoomCrypto: same key, same epoch
           this.hostId = this.peerId;
+          this.lastRefreshAt = Date.now();
           this.status = "";
+          this.logConn("the host left — this tab took over the room", "ok");
           this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· the host left — this tab keeps the room open", out: false });
         }
       } catch { /* retry next cycle */ }
@@ -249,9 +397,8 @@ class Portal {
     const holder = rec.host_peer_id;
     const healthy = this.members.has(holder) && Date.now() - this.lastHostContact < 300_000;
     if (healthy) return; // host still known and talking to us
-    try {
-      this.seekSeat(holder);
-    } catch { /* retry next cycle */ }
+    if (Date.now() - this.lastJoinMailAt < 15_000) return; // a request is already in flight
+    this.seekSeat(holder);
   }
 
   async drain() {
@@ -284,7 +431,9 @@ class Portal {
       this.members = new Map(kd.members.map((m) => [m.peer, m.name]));
       this.mySeq = Date.now();
       this.lastHostContact = Date.now();
+      this.seatAttempts = 0;
       this.status = "";
+      this.logConn(`seated by host ${from.slice(0, 8)}… — generation ${kd.epoch}`, "ok");
       return;
     }
     if ("Chat" in env) {
@@ -358,7 +507,10 @@ class Portal {
     if (diff !== 0) return; // proof failed
     const isNew = !this.members.has(from);
     this.members.set(from, j.name || from.slice(0, 10));
-    if (isNew) this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${j.name || from.slice(0, 10)} joined`, out: false });
+    if (isNew) {
+      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${j.name || from.slice(0, 10)} joined`, out: false });
+      this.logConn(`seated ${j.name || from.slice(0, 8)}… — key sent`, "ok");
+    }
     const kd: Envelope = {
       KeyDelivery: {
         room_id_hex: this.roomHex,
@@ -413,6 +565,26 @@ class Portal {
 const portal = new Portal();
 window.__ohPortal = portal;
 
+// iOS Safari ignores interactive-widget=resizes-content (a Chromium
+// feature): the keyboard overlays the layout viewport and pans the
+// fixed-inset shell up until the header is off screen and unreachable.
+// The visual viewport reports what is actually visible — size the shell
+// to it and follow its offset, so the header stays on screen and the
+// composer rides just above the keyboard. On Android (which already
+// resizes the layout) and desktop this is a no-op.
+const vv = window.visualViewport;
+if (vv) {
+  const fitApp = () => {
+    const el = document.getElementById("app");
+    if (!el) return;
+    el.style.height = `${vv.height}px`;
+    el.style.transform = `translateY(${vv.offsetTop}px)`;
+  };
+  vv.addEventListener("resize", fitApp);
+  vv.addEventListener("scroll", fitApp);
+  fitApp();
+}
+
 function setStatus(s: string) { portal.status = s; render(); }
 
 let view = "gate";
@@ -445,8 +617,18 @@ const isEarth = () => portal.word.trim().toLowerCase() === "earth";
 const roomName = () => (isEarth() ? "Earth room" : "Word room");
 
 function statusLine(): string {
-  if (portal.room) return "connected";
+  if (portal.room) {
+    if (portal.isHost) return "hosting — this tab holds the room open";
+    return `seated with host ${portal.hostId.slice(0, 8)}… · generation ${portal.room.epoch}`;
+  }
   return portal.status || "finding the room…";
+}
+
+/** Newest-last slice of the connection log, shown while we hold no seat. */
+function connLogHtml(rows = 4): string {
+  const slice = portal.events.slice(-rows);
+  if (!slice.length) return `<div class="cl-row"><span class="cl-ts">${fmt(Date.now())}</span>contacting the site…</div>`;
+  return slice.map((e) => `<div class="cl-row ${e.kind}"><span class="cl-ts">${fmt(e.ts)}</span>${esc(e.text)}</div>`).join("");
 }
 
 const inviteText = () =>
@@ -464,11 +646,12 @@ async function copyInvite() {
   toast("Invite copied — paste it to a friend");
 }
 
-// Site link: green while presence beats keep arriving (same 6-minute
-// staleness rule as the desktop app).
+// Site link: green only while a presence round-trip actually completed
+// (same 6-minute staleness rule as the desktop app). beat() sets siteOk
+// on every outcome, so a hung or unreachable hub shows grey.
 const origBeat = portal.beat.bind(portal);
 let siteBeatAt = 0;
-portal.beat = async () => { await origBeat(); siteBeatAt = Date.now(); };
+portal.beat = async () => { await origBeat(); if (portal.siteOk) siteBeatAt = Date.now(); };
 const siteLive = () => siteBeatAt > 0 && Date.now() - siteBeatAt < 360_000;
 const siteDotHtml = () => {
   const live = siteLive();
@@ -480,7 +663,13 @@ const siteDotHtml = () => {
 
 function ensureToasts(): HTMLElement {
   let box = document.querySelector<HTMLElement>(".toasts");
-  if (!box) { box = document.createElement("div"); box.className = "toasts"; document.body.appendChild(box); }
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "toasts";
+    // Inside the fitted shell, not the body: a body-fixed toast lands
+    // behind the open keyboard on iOS.
+    (document.getElementById("app") ?? document.body).appendChild(box);
+  }
   return box;
 }
 
@@ -492,7 +681,7 @@ function toast(text: string) {
   setTimeout(() => t.remove(), 6000);
 }
 
-type MenuItem = { label: string; hint?: string; header?: boolean; act?: () => void };
+type MenuItem = { label: string; hint?: string; header?: boolean; icon?: string; act?: () => void };
 
 /** Dropdown menu anchored to a command-bar control. One menu at a time;
  * dismissed by outside click or Escape. */
@@ -511,7 +700,8 @@ function openMenu(anchor: HTMLElement, items: MenuItem[]) {
     }
     const b = document.createElement("button");
     b.className = "menu-item";
-    b.innerHTML = `<span class="mi-label">${it.label}</span>${it.hint ? `<span class="mi-hint">${it.hint}</span>` : ""}`;
+    b.innerHTML = `${it.icon ? `<span class="mi-icon">${it.icon}</span>` : ""}
+      <span class="mi-text"><span class="mi-label">${it.label}</span>${it.hint ? `<span class="mi-hint">${it.hint}</span>` : ""}</span>`;
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       closeMenus();
@@ -521,8 +711,13 @@ function openMenu(anchor: HTMLElement, items: MenuItem[]) {
   }
   document.body.appendChild(m);
   const r = anchor.getBoundingClientRect();
+  // Anchor rects are in visual coords; the fixed menu lives in layout
+  // coords. While the iOS keyboard pans the shell (offsetTop > 0), add
+  // the pan and clamp to the visible height, not the full window.
+  const pan = window.visualViewport?.offsetTop ?? 0;
+  const visH = window.visualViewport?.height ?? window.innerHeight;
   m.style.left = Math.max(8, Math.min(r.left, window.innerWidth - m.offsetWidth - 8)) + "px";
-  m.style.top = Math.max(8, Math.min(r.bottom + 6, window.innerHeight - m.offsetHeight - 8)) + "px";
+  m.style.top = Math.max(8 + pan, Math.min(r.bottom + 6 + pan, pan + visH - m.offsetHeight - 8)) + "px";
 }
 function closeMenus() { document.getElementById("open-menu")?.remove(); }
 
@@ -559,6 +754,7 @@ function render() {
             <button id="p-join" class="primary" type="button">Enter the room</button>
           </div>
           <p class="gatehint" id="p-err"></p>
+          <p class="gatebuild">browser portal · build ${BUILD}</p>
         </div>
       </div>`;
     const word = $("p-word") as HTMLInputElement;
@@ -597,7 +793,8 @@ function render() {
     </header>
     <main>
       <div class="sidebar">
-        <div class="status">${esc(portal.status || statusLine())}</div>
+        <div class="status">${esc(statusLine())}</div>
+        ${portal.events.length ? `<div class="side-conn">${esc(portal.events[portal.events.length - 1]!.text)}</div>` : ""}
         <div class="side-label">this room</div>
         <div class="roomcard" title="${esc(portal.word)}">
           ${MAIN_ROOM_ICON}
@@ -631,13 +828,15 @@ function render() {
           ${MAIN_ROOM_ICON}
           <div class="tb-body">
             <div class="tb-title">${roomName()}</div>
-            <div class="tb-sub">${esc(statusLine())} · generation ${portal.room.epoch}</div>
+            <div class="tb-sub" title="${esc(statusLine())}">${esc(statusLine())}</div>
             <div class="pills">
               <span class="pill ${isEarth() ? "" : "amber"}" title="${isEarth() ? "everyone who uses the word earth meets here" : "only people who typed this room's word can be here"}">${isEarth() ? "public word" : "word room"}</span>
               <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
+              ${portal.room.epoch > 1 ? `<span class="pill">gen ${portal.room.epoch}</span>` : ""}
             </div>
           </div>
           <div class="tb-actions">
+            <button id="p-members" class="btn-ghost members-btn" title="people in this room">${memberCount} in room</button>
             <button id="p-invite" class="btn-ghost" title="copy a message a friend can follow to land in this room">＋ Invite</button>
           </div>
         </div>
@@ -658,9 +857,8 @@ function render() {
       </div>` : `
       <div class="empty">
         <div class="join-progress"><span class="spin"></span><span>${esc(portal.status || "finding the room…")}</span></div>
-        ${isEarth()
-          ? "Nobody is in Earth yet — if no host appears within a minute, this tab creates the room."
-          : "Only people with the same word (and the desktop app) can find this room."}
+        <div class="connlog">${connLogHtml()}</div>
+        <p class="connhint">Keep this tab open — the other side lands here the moment it uses the same word. Phones pause a tab when the screen locks; picking the phone back up reconnects it instantly.</p>
       </div>`}
     </main>`;
 
@@ -669,7 +867,7 @@ function render() {
     const el = e.currentTarget as HTMLElement;
     if (document.getElementById("open-menu")) { closeMenus(); return; }
     openMenu(el, [
-      { label: `${portal.name} · browser portal`, header: true },
+      { label: `${portal.name} · portal build ${BUILD}`, header: true },
       {
         label: "Log off",
         hint: "back to the join screen — your key stays in this browser",
@@ -681,11 +879,28 @@ function render() {
           if (n) n.value = portal.name;
         },
       },
-      { label: "Enter sends · Shift+Enter newline", header: true },
+      { label: `${BROWSER} · Enter sends, Shift+Enter newline`, header: true },
     ]);
   });
   $("p-invite")?.addEventListener("click", () => void copyInvite());
   $("p-invite-empty")?.addEventListener("click", () => void copyInvite());
+
+  // Phones fold the sidebar away — this button is the mobile home of the
+  // member list (and the room card's word/generation facts).
+  $("p-members")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    if (document.getElementById("open-menu")) { closeMenus(); return; }
+    openMenu(el, [
+      { label: `people in the room · ${roomName()}`, header: true },
+      ...[...portal.members].map(([peer, name]): MenuItem => ({
+        label: peer === myId ? `${name} (you)` : name,
+        hint: peer === myId ? (portal.isHost ? "this device — holding the room open" : "this device") : peer === portal.hostId ? "holding the room open" : "via site",
+        icon: avatarHtml(peer, name),
+      })),
+      { label: `${portal.word} · generation ${portal.room?.epoch ?? 1}`, header: true },
+    ]);
+  });
 
   const ta = $("p-send") as HTMLTextAreaElement | null;
   const sendIt = () => {
