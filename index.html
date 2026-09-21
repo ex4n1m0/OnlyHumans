@@ -104,6 +104,7 @@
   .hero h1 em { font-style: normal; color: var(--teal); }
   .hero p.lead { font-size: clamp(1.05rem, .95rem + .35vw, 1.5rem);
                  line-height: 1.65; color: #a9bcc4; }
+  .hero p.lead + p.lead { margin-top: 1.05rem; }
   .hero-live { margin: 1.8rem 0 0; font-size: 1.05rem; color: var(--ink); }
   .hero-live b { color: #fff; font-size: 1.45rem; }
   .hero-live .live-dot { display: inline-block; width: 10px; height: 10px; margin-right: .5rem; }
@@ -126,6 +127,14 @@
   .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .dl-note { font-size: .85rem; color: var(--muted); line-height: 1.6;
              margin-top: .5rem; }
+  /* which entry-pairings are fast vs slow — sits directly under the two
+     entry buttons (same ✔/◐ vocabulary as the security tiers) */
+  .pair-note { display: flex; flex-direction: column; gap: .4rem; align-items: center;
+               text-align: center; font-size: .95rem; color: #a9bcc4; line-height: 1.5;
+               background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+               padding: .75rem 1.25rem; max-width: 64ch; }
+  .pair-note b.fast { color: var(--green); }
+  .pair-note b.slow { color: var(--amber); }
 
   /* The mesh spans the whole hero behind the content at half opacity —
      the logo is the hero, the network is the atmosphere. */
@@ -269,11 +278,10 @@
         <img class="hero-logo" src="/logo.png" alt="OnlyHumans logo" width="1254" height="1254" decoding="async" fetchpriority="high">
       </picture>
       <h1>Every word is a <em>room</em>.</h1>
-      <p class="lead">Type <b>earth</b> and you're in the room everyone
-      shares. Type your own word and you're in a room only your people can
-      find — the word never leaves your device. Messages are sealed
-      end-to-end and travel straight between you;<br>
-      this site never sees a word.</p>
+      <p class="lead">Type a word, and you enter a space only the people who
+      know it can find. That word never leaves your device.</p>
+      <p class="lead">Messages are sealed end-to-end and sent directly between
+      you — this site never sees the word.</p>
 
       <p class="hero-live" id="hero-live" hidden>
         <span class="live-dot" aria-hidden="true"></span>
@@ -296,6 +304,10 @@
             <span>Join from your browser</span>
           </a>
         </div>
+        <p class="pair-note">
+          <span><b class="fast">✔ Fastest:</b> Windows app ↔ Windows app · web ↔ web</span>
+          <span><b class="slow">◐ Slower:</b> app ↔ web and web ↔ app — those pairs detour through the sealed site mailbox</span>
+        </p>
         <span class="dl-meta" id="dl-meta">v1.2.0</span>
         <span class="dl-note">Install, pick a name and a room word — Earth for
         everyone, your own word for just your people. Nothing to configure,
