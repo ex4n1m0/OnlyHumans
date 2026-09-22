@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnlyHumans — every word is a room</title>
-<meta name="description" content="Every word is a room. “Earth” is the room everyone shares; your own word is a room only your people can find. Sealed end-to-end, no accounts, no servers reading your words. Windows app or any browser.">
+<meta name="description" content="Every word is a room. “Earth” is the room everyone shares; your own word is a room only your people can find. Sealed end-to-end, no accounts, no servers reading your words.">
 <meta name="theme-color" content="#000000">
 <link rel="canonical" href="https://onlyhumans.deepflux.space/">
 <meta property="og:type" content="website">
@@ -16,8 +16,8 @@
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/icon-256.png">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"OnlyHumans",
-"operatingSystem":"Windows","applicationCategory":"CommunicationApplication",
+{"@context":"https://schema.org","@type":"WebApplication","name":"OnlyHumans",
+"applicationCategory":"CommunicationApplication","url":"https://onlyhumans.deepflux.space/join",
 "offers":{"@type":"Offer","price":"0"}}
 </script>
 <style>
@@ -121,11 +121,6 @@
     transition: transform .12s ease, box-shadow .12s ease;
   }
   a.dl:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(23,162,184,.35); }
-  /* the Windows installer is a footnote to the browser entry, not a peer */
-  a.dl-link { color: var(--muted); font-size: .95rem; text-decoration: underline;
-              text-underline-offset: 3px; }
-  a.dl-link:hover { color: var(--teal); }
-  .dl-meta { font-size: .85rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
   .dl-note { font-size: .85rem; color: var(--muted); line-height: 1.6;
              margin-top: .5rem; }
 
@@ -214,16 +209,9 @@
   details summary { cursor: pointer; color: #fff; font-weight: 600; font-size: .97rem;
                     padding: .35rem 0; }
   details p { color: #a9bcc4; font-size: .93rem; margin-top: .5rem; }
-  table.lat { border-collapse: collapse; margin-top: .7rem; font-size: .88rem; }
-  table.lat th { text-align: left; color: var(--muted); font-weight: 600;
-                 padding: .25rem 1rem .25rem 0; border-bottom: 1px solid var(--line); }
-  table.lat td { color: #a9bcc4; padding: .3rem 1rem .3rem 0;
-                 border-bottom: 1px solid var(--line); line-height: 1.45; }
-  table.lat td:first-child { color: var(--teal); white-space: nowrap; }
 
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding: 1.6rem;
            text-align: center; font-size: .85rem; color: var(--muted); line-height: 1.7; }
-  .deploy-line { font-family: ui-monospace, Consolas, monospace; font-size: .78rem; }
 
   /* ---------- responsive & input tweaks (kept last to win the cascade) ---------- */
   @media (max-width: 760px) {
@@ -257,7 +245,7 @@
     <a href="#security">Security</a>
     <a href="#faq">FAQ</a>
   </div>
-  <span class="live-pill" id="live-pill" hidden title="Running apps heartbeat an anonymous one-session token — no names, no peer ids.">
+  <span class="live-pill" id="live-pill" hidden title="Everyone online heartbeats an anonymous session token — no names, no peer ids.">
     <span class="live-dot" aria-hidden="true"></span>
     <span><b id="live-count">0</b> <span id="live-word">humans</span> online</span>
   </span>
@@ -289,14 +277,9 @@
           </svg>
           <span>Join from your browser</span>
         </a>
-        <a class="dl-link" id="dl-btn" href="/download/OnlyHumans-Setup-1.2.0.exe" download><span id="dl-label">Download for Windows</span></a>
-        <span class="dl-meta" id="dl-meta">v1.2.0</span>
         <span class="dl-note">Pick a name and a room word and you're in — Earth
         for everyone, your own word for just your people. Nothing to install,
-        no account to create. The Windows app keeps your history and holds
-        rooms open when tabs close. <b>Each version is its own room</b> — to
-        meet people on the newest app, keep yours up to date from this page.
-        Windows 10/11.</span>
+        no account to create.</span>
       </div>
     </div>
   </div>
@@ -332,19 +315,17 @@
       site only ever holds addresses and sealed mail it cannot read.</div>
     </div>
     <div class="stat">
-      <div class="n">2</div>
-      <div class="t">ways in — app or browser</div>
-      <div class="d">The Windows app and any browser meet in the same sealed
-      rooms. No accounts, no invites: a name and a word.</div>
+      <div class="n">0</div>
+      <div class="t">installs or accounts</div>
+      <div class="d">Open /join in any browser — phone, tablet, or desktop —
+      and you're in.</div>
     </div>
     <div class="stat">
       <div class="n">1</div>
       <div class="t">word = 1 room</div>
       <div class="d">Type the same word as your friends and you're in the
       same room — the word never leaves your device, and guessing one is
-      made deliberately expensive. And if a word ever gets out, ✦ Warp
-      moves everyone present into a new universe while the word starts
-      fresh for whoever types it next.</div>
+      made deliberately expensive.</div>
     </div>
   </div>
 
@@ -378,12 +359,12 @@
       or two — so delivery no longer needs both sides online at once. The
       inbox carries only ciphertext; the recipient verifies every sender, and
       the hub still can't read, forge, or alter a single word. Delivered this
-      way, the app marks the message <b>⇄ site</b>.</p>
+      way, the message is marked <b>⇄ site</b>.</p>
     </div>
   </div>
 
   <h2 id="security">Security, honestly</h2>
-  <p>Not "military-grade" adjectives — a graded model of what this app
+  <p>Not "military-grade" adjectives — a graded model of what the portal
   actually protects, what it reveals, and what it doesn't claim to solve.</p>
   <div class="tier-grid">
   <div class="tier ok">
@@ -402,7 +383,7 @@
     <ul>
       <li>That a peer id exists and its current addresses — signed by the peer, expiring in 5 minutes</li>
       <li>Which peer currently hosts which room — same signing, same expiry</li>
-      <li>An anonymous "an app is online" token every two minutes — random per session, never tied to an identity</li>
+      <li>An anonymous "someone is online" token every two minutes — random per session, never tied to an identity</li>
       <li>When direct delivery fails: sealed mailbox envelopes' sender/recipient ids, timing, and size — ciphertext only, signatures verified by recipients, not the hub</li>
     </ul>
     <p class="verdict">The hub is your own infrastructure and can never read a
@@ -413,9 +394,9 @@
     <h3>Out of scope — honest limits</h3>
     <ul>
       <li>A compromised device: malware on your machine can read your screen</li>
-      <li>Guessable words: a word room keeps out strangers who don't know the word — pick unguessable ones (the app rolls them for you)</li>
+      <li>Guessable words: a word room keeps out strangers who don't know the word — pick unguessable ones</li>
       <li>Global traffic analysis: metadata-resistant routing is not implemented</li>
-      <li>Browser clients: the /join portal keeps your key in browser storage — weaker than the signed app's. Fine for casual rooms; use the app for serious ones</li>
+      <li>Shared machines: your keys live in the browser's storage — anyone with access to the browser profile can take them</li>
     </ul>
   </div>
   </div>
@@ -429,71 +410,46 @@
   </details>
   <details name="faq">
     <summary>Where do my messages live?</summary>
-    <p>On the members' devices, sealed. The main room's history survives
-    restarts on your machine; private chats live in memory and vanish when
-    both people leave. The website never sees or stores a single word.</p>
+    <p>In your browser session, sealed — close the tab and the transcript
+    is gone. Private chats vanish when both people leave. This site never
+    sees or stores a single word.</p>
   </details>
   <details name="faq">
     <summary>What happens if this site disappears?</summary>
-    <p>The site is only the address book and the fallback mailbox. Without it,
-    the app can't introduce NEW peers to each other — but people already
-    connected keep talking, and the site has no messages to lose.</p>
+    <p>The site is only the address book and the fallback mailbox. Without
+    it, new peers can't find each other — and the site holds no messages,
+    so there's nothing to lose.</p>
   </details>
   <details name="faq">
     <summary>Who can join Earth?</summary>
-    <p>Anyone with the app — or a browser at /join. The first person online
-    creates Earth and hosts it; the host can ✦ Warp at any moment, moving
-    everyone present to a new universe while the word starts a fresh room
-    for whoever comes next.</p>
+    <p>Anyone. The first person online creates Earth and hosts it; the host
+    can ✦ Warp at any moment, moving everyone present to a new universe
+    while the word starts a fresh room for whoever comes next.</p>
   </details>
   <details name="faq">
     <summary>What's a word room?</summary>
     <p>Exactly what it sounds like: type a word at the door and you're in a
-    room with everyone who types the same word. The word never leaves your
-    device — each machine derives the same room from it, through a
-    memory-hard function that makes guessing expensive. Roll a generated
-    phrase for private rooms; Earth is the public one.</p>
+    room with everyone who types the same word — Earth is the public one.
+    The word never leaves your device; each machine derives the same room
+    from it, through a memory-hard function that makes guessing expensive.</p>
   </details>
   <details name="faq">
     <summary>What is ✦ Warp?</summary>
-    <p>The host's escape hatch, in the browser portal. Warp re-keys the
-    room: everyone present moves together into a new universe, and the word
-    immediately starts a fresh room for whoever types it next. A leaked
-    word stops being a problem — your group is gone, and strangers still
-    get a working room. Each universe is keyed separately; an old
-    universe's key opens nothing new.</p>
+    <p>The host's escape hatch. Warp re-keys the room: everyone present
+    moves together into a new universe, and the word immediately starts a
+    fresh room for whoever types it next. A leaked word stops being a
+    problem — your group is gone, and strangers still get a working room.</p>
   </details>
   <details name="faq">
     <summary>Someone was offline when I sent a message. Is it lost?</summary>
-    <p>No — since 1.0.12 the message waits sealed on the site's fallback
-    mailbox and arrives when they're back, usually within a minute or two.
-    It's marked <b>⇄ site</b> so the path is visible.</p>
-  </details>
-  <details name="faq">
-    <summary>Do we all need the same version?</summary>
-    <p>Yes — every release is its own room: people on different versions
-    can't see each other. If a friend is on a newer build, download the
-    latest from this page to join them; older versions keep working fine
-    among themselves.</p>
-  </details>
-  <details name="faq">
-    <summary>Can I chat without installing anything?</summary>
-    <p>Yes — <a href="/join">/join</a> is the browser portal. Same sealed
-    rooms, same words (Earth is the public one), no account. The portal keeps
-    a session's messages only — the app keeps history.</p>
-    <table class="lat">
-      <tr><th>path</th><th>speed</th></tr>
-      <tr><td>app → app</td><td>instant — straight device to device</td></tr>
-      <tr><td>browser → browser</td><td>seconds — both poll the sealed mailbox</td></tr>
-      <tr><td>app → browser</td><td>~15–20 s — brief direct attempt, then the sealed mailbox</td></tr>
-      <tr><td>browser → app</td><td>up to ~2 min — the app checks its site mailbox every two minutes</td></tr>
-    </table>
+    <p>No — it waits sealed on the site's fallback mailbox and arrives when
+    they're back, usually within a minute or two. It's marked <b>⇄ site</b>
+    so the path is visible.</p>
   </details>
   <details name="faq">
     <summary>Does it work on my phone?</summary>
     <p>Yes — open <a href="/join">/join</a> in any browser, nothing to
-    install. The portal keeps one session's messages; the app keeps
-    history.</p>
+    install.</p>
   </details>
   </div>
 
@@ -508,7 +464,6 @@
     <span class="wordmark" style="font-size:1rem">only<b>humans</b></span>
   </div>
   onlyhumans.deepflux.space — no trackers, no cookies, no third-party requests.
-  <div class="deploy-line" id="deploy-line"></div>
 </footer>
 
 <script>
@@ -570,25 +525,6 @@
         tabs[n].focus();
       });
     });
-  })();
-
-  // Version metadata (Windows installer; other devices join via /join).
-  (function () {
-    fetch("/version.json")
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (v) {
-        if (!v) return;
-        var meta = ["v" + v.version];
-        if (v.size) meta.push(v.size);
-        if (v.date) meta.push("deployed " + new Date(v.date + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }));
-        document.getElementById("dl-btn").href = v.file;
-        document.getElementById("dl-meta").textContent = meta.join(" · ");
-        if (v.version) {
-          document.getElementById("deploy-line").textContent =
-            "site build " + v.version + " · " + v.date;
-        }
-      })
-      .catch(function () {});
   })();
 </script>
 </body>
