@@ -554,8 +554,11 @@ class Portal {
     } else if (this.isHost) {
       // Room records live 300s on the hub; refresh at 45s so a phone
       // throttling our timers still keeps the room findable, and a
-      // dead-host pointer clears fast once we are really gone.
-      if (Date.now() - this.lastRefreshAt > 45_000) await this.hostRefresh();
+      // dead-host pointer clears fast once we are really gone. A WARPED
+      // host (epoch ≥ 2) deliberately stops refreshing: the word's record
+      // lapses and the next person typing it founds the word room fresh —
+      // newcomers are handed our successor key directly in the meantime.
+      if (this.room!.epoch === 1 && Date.now() - this.lastRefreshAt > 45_000) await this.hostRefresh();
     } else if (Date.now() - this.lastHostContact > 45_000) {
       await this.rediscover();
     }
@@ -590,6 +593,62 @@ class Portal {
         this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· another live host holds the room", out: false });
       }
     } catch { this.noteSite(false); /* retry next cycle */ }
+  }
+
+  // ------------------------------------------------------------- warp
+  // The host's "change room key": everyone HERE travels to a new universe
+  // (a rotate frame, byte-compatible with the desktop app), while the
+  // word deliberately resets — newcomers typing it are seated into a
+  // fresh epoch-1 room under a successor key we mint, and once our word
+  // record lapses (≤5 min) the first of them takes it over naturally.
+
+  /// Successor room we host for word-newcomers while warped: key minted at
+  /// the first warp, members accumulate as they join. We seal their
+  /// Members frames under THEIR key; our own id never enters their list.
+  successor: { crypto: RoomCrypto; key: Uint8Array; seq: number; peers: Map<string, string> } | null = null;
+
+  async warp() {
+    if (!this.room || !this.isHost || this.room.epoch < 1) return;
+    const secret = { next_epoch: this.room.epoch + 1, next_key_b64: b64(crypto.getRandomValues(new Uint8Array(32))) };
+    this.mySeq++;
+    const frame = this.room.seal(this.peerId, this.mySeq, KIND.rotate, utf8(JSON.stringify(secret)));
+    if (!mailFits({ Rotate: { frame } })) return;
+    this.room.applyRotation(secret);
+    this.lastHostContact = Date.now();
+    this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· warped to universe ${this.room.epoch} — the word now starts a fresh room`, out: false });
+    this.logConn(`warped to universe ${this.room.epoch} — the word's record will lapse`, "ok");
+    render();
+    await this.fanOut({ Rotate: { frame } });
+  }
+
+  /// A word-newcomer knocked while we hold a warped room: seat them (and
+  /// re-seat returners) into the successor universe with the full successor
+  /// member list, and keep every other successor's list current.
+  async seatSuccessor(peer: string, name: string) {
+    if (!this.room || this.room.epoch < 2) return;
+    if (!this.successor) {
+      const key = crypto.getRandomValues(new Uint8Array(32));
+      this.successor = { crypto: new RoomCrypto(unhex(this.roomHex), 1, key), key, seq: Date.now(), peers: new Map() };
+    }
+    this.successor.peers.set(peer, name || peer.slice(0, 10));
+    const list = [...this.successor.peers.entries()].map(([p, n]) => ({ peer: p, name: n }));
+    const kd: Envelope = {
+      KeyDelivery: {
+        room_id_hex: this.roomHex,
+        epoch: 1,
+        key_ct_b64: b64(sealRoomKey(this.egk, this.successor.crypto.roomId, 1, peer, this.successor.key)),
+        members: list,
+      },
+    };
+    const batch: Array<{ to: string; env: Envelope }> = [{ to: peer, env: kd }];
+    if (this.successor.peers.size > 1) {
+      this.successor.seq++;
+      const mf = this.successor.crypto.seal(this.peerId, this.successor.seq, KIND.members,
+        utf8(JSON.stringify({ members: list })));
+      for (const p of this.successor.peers.keys()) if (p !== peer) batch.push({ to: p, env: { Members: { frame: mf } } });
+    }
+    this.logConn(`seated ${name || peer.slice(0, 8)}… into the word's fresh universe — we stay in ${this.room.epoch}`, "ok");
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
   }
 
   /// A member whose host vanished (tab closed, app gone past the record
@@ -658,7 +717,7 @@ class Portal {
       this.lastHostContact = Date.now();
       this.seatAttempts = 0;
       this.status = "";
-      this.logConn(`seated by host ${from.slice(0, 8)}… — generation ${kd.epoch}`, "ok");
+      this.logConn(`seated by host ${from.slice(0, 8)}… — universe ${kd.epoch}`, "ok");
       this.profilePush(); // introduce ourselves to the room we just joined
       return;
     }
@@ -697,7 +756,7 @@ class Portal {
       const body = fromUtf8(this.room.open(env.Rotate.frame, KIND.rotate));
       this.room.applyRotation(JSON.parse(body));
       this.lastHostContact = Date.now();
-      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· key rotated to generation " + this.room.epoch + " — the room is closed to newcomers", out: false });
+      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· warped to universe " + this.room.epoch + " — the word now starts a fresh room", out: false });
       return;
     }
     if ("Join" in env) {
@@ -740,9 +799,22 @@ class Portal {
   async hostHandleJoin(from: string, j: Extract<Envelope, { Join: unknown }>["Join"]) {
     if (!this.isHost || !this.room) return;
     if (j.room_id_hex !== this.roomHex || j.guest_id !== from) return;
-    // Mirror the Rust host: the first rotation seals the room — a valid GK
-    // proof no longer mints a seat from epoch 2 onward.
-    if (this.room.epoch > 1 && !this.members.has(from)) return;
+    // A warped room (epoch ≥ 2) no longer admits word-newcomers into OUR
+    // universe — hand them the successor room instead, so the word keeps
+    // working for whoever types it next.
+    if (this.room.epoch > 1 && !this.members.has(from)) {
+      // The admission proof still gates the successor seat: only people
+      // who know the word (or GK on earth) may take it.
+      const nonce = unb64(j.guest_nonce_b64);
+      const expect = admissionProof(this.egk, j.guest_id, nonce);
+      const got = unb64(j.guest_proof_b64);
+      let diff = 0;
+      if (expect.length !== got.length) return;
+      for (let i = 0; i < expect.length; i++) diff |= expect[i] ^ got[i];
+      if (diff !== 0) return;
+      void this.seatSuccessor(from, j.name);
+      return;
+    }
     const nonce = unb64(j.guest_nonce_b64);
     const expect = admissionProof(this.egk, j.guest_id, nonce);
     const got = unb64(j.guest_proof_b64);
@@ -1385,11 +1457,12 @@ function render() {
             <div class="pills">
               <span class="pill ${isEarth() ? "" : "amber"}" title="${isEarth() ? "everyone who uses the word earth meets here" : "only people who typed this room's word can be here"}">${isEarth() ? "public word" : "word room"}</span>
               <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
-              ${portal.room && portal.room.epoch > 1 ? `<span class="pill">gen ${portal.room.epoch}</span>` : ""}
+              ${portal.room && portal.room.epoch > 1 ? `<span class="pill" title="this room has warped ${portal.room.epoch - 1} time${portal.room.epoch === 2 ? "" : "s"} — you are in universe ${portal.room.epoch}">universe ${portal.room.epoch}</span>` : ""}
             </div>
           </div>
           <div class="tb-actions">
             <button id="p-members" class="btn-ghost members-btn" title="people in this room">${memberCount} in room</button>
+            ${portal.isHost ? `<button id="p-warp" class="btn-ghost" title="move everyone here into a new universe — the word will start a fresh room for whoever types it next">✦ Warp</button>` : ""}
             <button id="p-invite" class="btn-ghost" title="copy a link that opens this room — the word is already in it">＋ Invite</button>
           </div>`}
         </div>
@@ -1505,6 +1578,24 @@ function render() {
   });
   $("p-invite")?.addEventListener("click", () => void copyInvite());
   $("p-invite-empty")?.addEventListener("click", () => void copyInvite());
+
+  // Warp is irreversible (the word's public side resets), so it confirms
+  // through the same menu language as everything else.
+  $("p-warp")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const el = e.currentTarget as HTMLElement;
+    if (document.getElementById("open-menu")) { closeMenus(); return; }
+    const next = (portal.room?.epoch ?? 1) + 1;
+    openMenu(el, [
+      { label: `warp to universe ${next}?`, header: true },
+      {
+        label: "✦ Warp",
+        hint: "everyone here moves to a new key; the word founds a fresh room for newcomers",
+        act: () => void portal.warp(),
+      },
+      { label: "stay here", hint: `universe ${portal.room?.epoch ?? 1} keeps going`, act: () => {} },
+    ]);
+  });
 
   // Private chats: the ⇄ chip on a member row opens (or re-opens) one and
   // mails the invite; the dm rows switch conversations. Row clicks never
@@ -1638,7 +1729,7 @@ function render() {
         });
       }
     }
-    items.push({ label: `${portal.word} · generation ${portal.room?.epoch ?? 1}`, header: true });
+    items.push({ label: `${portal.word} · universe ${portal.room?.epoch ?? 1}`, header: true });
     openMenu(el, items);
   });
 
