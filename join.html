@@ -14,7 +14,7 @@
 <meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="script" href="/join-assets/portal-POVBA4DO.js">
+<link rel="preload" as="script" href="/join-assets/portal-OJ4FPLDP.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -245,6 +245,29 @@
   }
   .composer button { flex-shrink: 0; }
 
+  /* shared images — re-encoded to ≤30 KB on the sender's device
+     (docs/image-sharing-study.md inline tier) */
+  .msg.hasimg { max-width: min(85%, 340px); padding: 4px; }
+  .msg.hasimg .meta { padding: 2px 6px 3px; }
+  .msgimg { display: block; max-width: 100%; max-height: 240px; border-radius: 8px;
+            cursor: zoom-in; margin-top: 4px; }
+  .msg.hasimg:not(.out) .msgimg, .msg.out .msgimg { background: #1d313c; }
+  .imgqueue { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+              background: var(--panel); border-top: 1px solid #1f3038; }
+  .imgqueue .spin { flex-shrink: 0; }
+  .iq-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 7px;
+              border: 1px solid var(--line); flex-shrink: 0; }
+  .iq-meta { flex: 1; font-size: 11px; color: var(--muted); min-width: 0;
+             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .iq-x { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center;
+          justify-content: center; color: var(--muted); border-radius: 7px; flex-shrink: 0; }
+  .iq-x:hover { color: var(--amber); }
+  .composer .attach { width: 35px; height: 35px; padding: 0; display: inline-flex;
+                      align-items: center; justify-content: center; color: var(--muted); }
+  .composer .attach svg { width: 17px; height: 17px; }
+  .composer .attach:hover { color: var(--teal); }
+  .messages.dropglow { outline: 2px dashed var(--teal-dim); outline-offset: -6px; }
+
   input, button, textarea {
     background: #1a2a33; color: var(--text); border: 1px solid #24373f;
     border-radius: 6px; padding: 7px 10px; font-size: 13px; outline: none;
@@ -314,6 +337,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-POVBA4DO.js" defer></script>
+<script src="/join-assets/portal-OJ4FPLDP.js" defer></script>
 </body>
 </html>

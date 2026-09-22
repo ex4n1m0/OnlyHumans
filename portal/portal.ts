@@ -205,6 +205,19 @@ function unpad(padded: Uint8Array): Uint8Array {
   return padded.subarray(4, 4 + len);
 }
 
+/// Length-prefix only, no bucket rounding. unpad() on both sides (here and
+/// in Rust crypto.rs) accepts any padded length — buckets are a
+/// traffic-shape property, not a format requirement. Image frames use this
+/// so a ~30 KB body isn't rounded up to a bucket whose ciphertext would
+/// cross the hub's 64 KB env_json cap; the image's approximate size is
+/// public by choice anyway (docs/image-sharing-study.md).
+function padExact(body: Uint8Array): Uint8Array {
+  const out = new Uint8Array(4 + body.length);
+  new DataView(out.buffer).setUint32(0, body.length, true);
+  out.set(body, 4);
+  return out;
+}
+
 export interface Sealed {
   room_id_hex: string;
   epoch: number;
@@ -223,10 +236,10 @@ export class RoomCrypto {
     return hkdf32(this.key, concat(this.roomId, u64le(this.epoch)), concat(kind, utf8(sender), u64le(seq)));
   }
 
-  seal(sender: string, seq: number, kind: Uint8Array, plaintext: Uint8Array): Sealed {
+  seal(sender: string, seq: number, kind: Uint8Array, plaintext: Uint8Array, exact = false): Sealed {
     const mk = this.messageKey(sender, seq, kind);
     const nonce = crypto.getRandomValues(new Uint8Array(24));
-    const ct = xchacha20poly1305(mk, nonce, aad(kind, this.roomId, this.epoch, sender, seq)).encrypt(pad(plaintext));
+    const ct = xchacha20poly1305(mk, nonce, aad(kind, this.roomId, this.epoch, sender, seq)).encrypt(exact ? padExact(plaintext) : pad(plaintext));
     return { room_id_hex: this.roomHex, epoch: this.epoch, sender, seq, nonce_b64: b64(nonce), ct_b64: b64(ct) };
   }
 

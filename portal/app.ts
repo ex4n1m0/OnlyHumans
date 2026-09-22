@@ -47,7 +47,7 @@ const BROWSER = (() => {
   return `${name} · ${os}`;
 })();
 
-interface Msg { ts: number; sender: string; name: string; body: string; out: boolean }
+interface Msg { ts: number; sender: string; name: string; body: string; out: boolean; img?: ImgMsg }
 
 /** One ephemeral two-person room (mirrors core rooms.rs DmRoom): a random
  *  key only the two peers hold, memory-only, never rotated, delivered
@@ -70,6 +70,146 @@ interface DmState {
  *  tab makes, so two clients that can't see each other are debuggable at
  *  a glance instead of staring at a spinner. */
 interface ConnEvent { ts: number; text: string; kind: "try" | "ok" | "warn" }
+
+// ---------------------------------------------------------------- images
+// Inline tier (docs/image-sharing-study.md): every image is re-encoded ON
+// THE DEVICE down to IMG_BUDGET bytes, so the sealed frame it rides stays
+// under the hub's 64 KB env_json cap with zero hub changes. Re-encoding
+// also strips EXIF/GPS — originals never leave the device. Body format on
+// the wire: {"ohimg":{"d","w","h","m"},"t":"caption"} as a Chat frame with
+// exact (non-bucket) padding; text-only messages keep the raw-text body of
+// every shipped client.
+
+interface ImgPayload { d: string; w: number; h: number; m: string }
+interface ImgMsg { src: string; w: number; h: number }
+interface PendingImg extends ImgPayload { src: string; bytes: number }
+
+const IMG_BUDGET = 30 * 1024;
+
+let pendingImg: PendingImg | null = null;
+let converting = false;
+
+function payloadToImg(p: ImgPayload): ImgMsg {
+  return { src: `data:${p.m};base64,${p.d}`, w: p.w, h: p.h };
+}
+
+/** Standard base64 of a Blob via its data URL (FileReader emits standard
+ *  alphabet — the protocol's b64() is the URL-safe one, so keep these two
+ *  worlds separate: `d` is only ever consumed by <img src=data:…>). */
+function blobToStdB64(blob: Blob): Promise<string> {
+  return new Promise((ok, err) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result).replace(/^data:[^,]*,/, ""));
+    r.onerror = () => err(r.error ?? new Error("could not read the encoded image"));
+    r.readAsDataURL(blob);
+  });
+}
+
+async function canvasToBlob(canvas: HTMLCanvasElement, mime: string, q: number): Promise<Blob | null> {
+  return new Promise((ok) => canvas.toBlob(ok, mime, q));
+}
+
+/** Detect once whether toBlob actually encodes WebP — Safari silently
+ *  returns PNG instead, and PNG at these dimensions would blow the budget
+ *  for no quality win. */
+let webpOk: Promise<boolean> | null = null;
+function canWebp(): Promise<boolean> {
+  webpOk ??= (async () => {
+    const c = document.createElement("canvas");
+    c.width = c.height = 1;
+    const b = await canvasToBlob(c, "image/webp", 0.5);
+    return !!b && b.type === "image/webp";
+  })();
+  return webpOk;
+}
+
+/** The automatic converter: decode, then walk a resolution × quality
+ *  ladder until the re-encode fits IMG_BUDGET. Typical phone photos land
+ *  at 880–1024 px WebP; every step costs one fast canvas encode. */
+async function fileToImagePayload(file: Blob): Promise<PendingImg> {
+  const bmp = await createImageBitmap(file); // throws on undecodable (HEIC in Chrome)
+  const mime = (await canWebp()) ? "image/webp" : "image/jpeg";
+  for (const edge of [1280, 1024, 880, 720, 560, 440, 320]) {
+    const scale = Math.min(1, edge / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d")!;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    // JPEG has no alpha: flatten onto the inbound bubble colour so
+    // transparent PNGs don't turn black.
+    ctx.fillStyle = "#1d313c";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    for (const q of [0.75, 0.62, 0.5, 0.4]) {
+      const blob = await canvasToBlob(canvas, mime, q);
+      if (blob && blob.type === mime && blob.size <= IMG_BUDGET) {
+        const d = await blobToStdB64(blob);
+        return { d, w, h, m: mime, src: `data:${mime};base64,${d}`, bytes: blob.size };
+      }
+    }
+  }
+  throw new Error("shrink");
+}
+
+async function pickImage(file: Blob | null | undefined) {
+  if (!file || converting) return;
+  converting = true;
+  pendingImg = null;
+  render();
+  try {
+    pendingImg = await fileToImagePayload(file);
+  } catch {
+    toast("couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to 30 KB");
+  } finally {
+    converting = false;
+    render();
+  }
+}
+
+/** Inbound body: image frames are JSON with a whitelisted mime and a
+ *  standard-b64 `d` (regex-validated so a crafted payload can never break
+ *  out of the src attribute); anything else is plain text as before. */
+function parseChatBody(body: string): { text: string; img?: ImgMsg } {
+  if (body.startsWith('{"ohimg"')) {
+    try {
+      const j = JSON.parse(body) as { ohimg?: { d?: unknown; w?: unknown; h?: unknown; m?: unknown }; t?: unknown };
+      const im = j.ohimg;
+      if (
+        im && typeof im.d === "string" && im.d.length > 100 && im.d.length <= 48000 &&
+        /^[A-Za-z0-9+/]+={0,2}$/.test(im.d) &&
+        (im.m === "image/jpeg" || im.m === "image/webp")
+      ) {
+        const dim = (v: unknown) => Math.max(1, Math.min(20000, Math.round(Number(v) || 320)));
+        return { text: typeof j.t === "string" ? j.t : "", img: { src: `data:${im.m};base64,${im.d}`, w: dim(im.w), h: dim(im.h) } };
+      }
+    } catch { /* not an image frame — fall through to text */ }
+  }
+  return { text: body };
+}
+
+/** Hard hub rule (api/inbox.ts): env_json ≤ 65536 chars. Refuse to push
+ *  anything larger — with the 30 KB budget this never fires; it is the
+ *  safety net that keeps a bug from 400ing the whole fan-out batch. */
+function mailFits(env: Envelope): boolean {
+  return JSON.stringify(env).length <= 65500;
+}
+
+const PAPERCLIP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
+
+const imgInput = document.createElement("input");
+imgInput.type = "file";
+imgInput.accept = "image/*";
+imgInput.style.display = "none";
+document.body.appendChild(imgInput);
+imgInput.addEventListener("change", () => {
+  const f = imgInput.files?.[0];
+  imgInput.value = ""; // allow re-picking the same file
+  void pickImage(f);
+});
 
 class Portal {
   hub = new Hub("");
@@ -470,7 +610,8 @@ class Portal {
       const seq = env.Chat.frame.seq;
       if (seq <= (this.seenSeq.get(sender) ?? 0)) return; // replay guard
       this.seenSeq.set(sender, seq);
-      this.msgs.push({ ts: Date.now(), sender, name: this.members.get(sender) ?? sender.slice(0, 10), body, out: false });
+      const pm = parseChatBody(body);
+      this.msgs.push({ ts: Date.now(), sender, name: this.members.get(sender) ?? sender.slice(0, 10), body: pm.text, out: false, img: pm.img });
       return;
     }
     if ("Members" in env) {
@@ -580,11 +721,20 @@ class Portal {
     await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
   }
 
-  async send(text: string) {
-    if (!this.room || !text.trim()) return;
+  async send(text: string, img?: ImgPayload) {
+    const body = text.trim();
+    if (!this.room || (!body && !img)) return;
     this.mySeq++;
-    const frame = this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(text));
-    this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body: text, out: true });
+    // Wire payload is exactly {d,w,h,m}: callers hold richer objects
+    // (PendingImg carries src+bytes) — never fold those into the frame.
+    const frame = img
+      ? this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(JSON.stringify({ ohimg: { d: img.d, w: img.w, h: img.h, m: img.m }, t: body })), true)
+      : this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(text));
+    if (!mailFits({ Chat: { frame } })) {
+      toast("this image didn't fit the mail limit — nothing was sent");
+      return;
+    }
+    this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined });
     render();
     await this.fanOut({ Chat: { frame } });
   }
@@ -635,13 +785,22 @@ class Portal {
     await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, [{ to: dm.peer, env: inv }]).catch(() => {});
   }
 
-  async sendDm(hex: string, text: string) {
+  async sendDm(hex: string, text: string, img?: ImgPayload) {
     const dm = this.dms.get(hex);
-    if (!dm || !text.trim()) return;
+    const body = text.trim();
+    if (!dm || (!body && !img)) return;
     dm.mySeq++;
+    const frame = img
+      ? dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(JSON.stringify({ ohimg: { d: img.d, w: img.w, h: img.h, m: img.m }, t: body })), true)
+      : dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(text));
+    if (!mailFits({ Chat: { frame } })) {
+      toast("this image didn't fit the mail limit — nothing was sent");
+      return;
+    }
+    // Count the send only now: the split-brain adoption rule keys off
+    // frames actually sent under our key.
     dm.sent++;
-    const frame = dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(text));
-    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body: text, out: true });
+    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined });
     render();
     const batch: Array<{ to: string; env: Envelope }> = [{ to: dm.peer, env: { Chat: { frame } } }];
     if (dm.unconfirmed) {
@@ -665,7 +824,8 @@ class Portal {
     if (frame.seq <= dm.seenSeq) return; // replay guard (per-DM counter)
     dm.seenSeq = frame.seq;
     dm.unconfirmed = false;
-    dm.msgs.push({ ts: Date.now(), sender: from, name: this.members.get(from) ?? from.slice(0, 10), body, out: false });
+    const pm = parseChatBody(body);
+    dm.msgs.push({ ts: Date.now(), sender: from, name: this.members.get(from) ?? from.slice(0, 10), body: pm.text, out: false, img: pm.img });
     if (activeRoom !== frame.room_id_hex) dm.unread++;
   }
 
@@ -883,11 +1043,16 @@ document.addEventListener("click", (e) => {
 function msgHtml(m: Msg): string {
   if (!m.sender) return `<div class="narration">${esc(m.body.replace(/^·\s*/, ""))}</div>`;
   const meta = `<div class="meta">${fmt(m.ts)} · <span class="viasite" title="travelled end-to-end sealed through the site's mailbox">⇄ site</span></div>`;
-  if (m.out) return `<div class="msg out">${esc(m.body)}${meta}</div>`;
+  const img = m.img
+    ? `<img class="msgimg" src="${m.img.src}" style="aspect-ratio:${m.img.w} / ${m.img.h}" alt="shared image" loading="lazy">`
+    : "";
+  const cap = m.body ? esc(m.body) : "";
+  const cls = m.img ? "msg hasimg" : "msg";
+  if (m.out) return `<div class="${cls} out">${cap}${img}${meta}</div>`;
   const hue = peerHue(m.sender);
   return `
     <div class="sender" style="color:hsl(${hue} 65% 70%)">${esc(m.name)}</div>
-    <div class="msg in">${esc(m.body)}${meta}</div>`;
+    <div class="${cls} in">${cap}${img}${meta}</div>`;
 }
 
 /// Unread DMs surface in the tab title — the only channel that signals
@@ -1042,8 +1207,16 @@ function render() {
           ${activeDm && activeDm.msgs.length === 0 ? `<div class="chat-hint">This is a sealed two-person room — only you and ${esc(dmName(activeDm.peer))} hold this key.</div>` : ""}
           ${(activeDm ? activeDm.msgs : portal.msgs).map(msgHtml).join("")}
         </div>
+        ${(pendingImg || converting) ? `
+        <div class="imgqueue">
+          ${converting || !pendingImg ? `<span class="spin"></span><span class="iq-meta">shrinking the image to 30 KB…</span>` : `
+            <img class="iq-thumb" src="${pendingImg.src}" alt="">
+            <span class="iq-meta">${(pendingImg.bytes / 1024).toFixed(1)} KB · ${pendingImg.w}×${pendingImg.h} · ready — Enter sends</span>
+            <button id="p-imgx" class="iq-x" type="button" title="remove the image" aria-label="remove the image">✕</button>`}
+        </div>` : ""}
         <div class="composer">
-          <textarea id="p-send" rows="1" placeholder="${activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
+          <button id="p-attach" class="attach" type="button" title="attach an image — re-encoded on your device to 30 KB or less (EXIF stripped)" aria-label="attach an image">${PAPERCLIP}</button>
+          <textarea id="p-send" rows="1" placeholder="${pendingImg ? "caption (optional)…" : activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
           <button id="p-sendbtn" class="primary" type="button">Send</button>
         </div>
       </div>` : `
@@ -1174,15 +1347,23 @@ function render() {
   const ta = $("p-send") as HTMLTextAreaElement | null;
   const sendIt = () => {
     const v = ta!.value.replace(/\s+$/, "");
-    if (!v.trim()) { ta!.value = ""; autosize(ta!); return; }
+    if (!v.trim() && !pendingImg) { ta!.value = ""; autosize(ta!); return; }
+    const img = pendingImg ?? undefined;
+    pendingImg = null;
     ta!.value = "";
     autosize(ta!);
-    if (activeDm && activeRoom) void portal.sendDm(activeRoom, v);
-    else void portal.send(v);
+    if (activeDm && activeRoom) void portal.sendDm(activeRoom, v, img);
+    else void portal.send(v, img);
   };
   if (ta) {
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendIt(); } });
     ta.addEventListener("input", () => autosize(ta));
+    // Pasting a screenshot grabs the image; pasting text still works.
+    ta.addEventListener("paste", (e) => {
+      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
+      const f = item?.getAsFile();
+      if (f) { e.preventDefault(); void pickImage(f); }
+    });
     if (sendState) {
       ta.value = sendState.value;
       if (sendState.focused) { ta.focus(); autosize(ta); }
@@ -1191,8 +1372,37 @@ function render() {
     }
   }
   $("p-sendbtn")?.addEventListener("click", sendIt);
+  $("p-attach")?.addEventListener("click", () => imgInput.click());
+  $("p-imgx")?.addEventListener("click", () => { pendingImg = null; render(); });
   const box = $("p-msgs");
-  if (box) box.scrollTop = box.scrollHeight;
+  if (box) {
+    box.scrollTop = box.scrollHeight;
+    // Click a shared image to view it full size. The window opens
+    // synchronously (popup blockers) and gets a blob URL once decoded.
+    box.addEventListener("click", (e) => {
+      const t = e.target as HTMLElement;
+      if (t.tagName !== "IMG" || !t.classList.contains("msgimg")) return;
+      const w = window.open("", "_blank");
+      fetch(t.getAttribute("src")!)
+        .then((r) => r.blob())
+        .then((b) => {
+          const u = URL.createObjectURL(b);
+          if (w) w.location.href = u;
+          setTimeout(() => URL.revokeObjectURL(u), 60_000);
+        })
+        .catch(() => w?.close());
+    });
+    // Drag-and-drop targets the messages pane (document-level handlers
+    // below stop the browser from navigating to the dropped file).
+    box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("dropglow"); });
+    box.addEventListener("dragleave", () => box.classList.remove("dropglow"));
+    box.addEventListener("drop", (e) => {
+      e.preventDefault();
+      box.classList.remove("dropglow");
+      const f = e.dataTransfer?.files?.[0];
+      if (f && f.type.startsWith("image/")) void pickImage(f);
+    });
+  }
 }
 
 function fmt(ts: number) {
@@ -1227,5 +1437,14 @@ async function doJoin() {
 // The name is never remembered between visits — every load starts with a
 // clean gate. removeItem also scrubs what older builds persisted.
 localStorage.removeItem("oh-portal-name");
+
+// A dropped file must never navigate the tab away from the room — the
+// pane-level handler consumes real image drops.
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", (e) => e.preventDefault());
+
+// Console hook for e2e/debugging (same spirit as __ohPortal).
+(window as any).__ohImg = { pickImage, fileToImagePayload, parseChatBody, mailFits, pending: () => pendingImg };
+
 render();
 portal.prefetch();
