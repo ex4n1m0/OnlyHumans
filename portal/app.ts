@@ -1074,14 +1074,6 @@ function autosize(el: HTMLTextAreaElement) {
 const isEarth = () => portal.word.trim().toLowerCase() === "earth";
 const roomName = () => (isEarth() ? "Earth room" : "Word room");
 
-function statusLine(): string {
-  if (portal.room) {
-    if (portal.isHost) return "hosting — this tab holds the room open";
-    return `seated with host ${portal.hostId.slice(0, 8)}… · generation ${portal.room.epoch}`;
-  }
-  return portal.status || "finding the room…";
-}
-
 /** Newest-last slice of the connection log, shown while we hold no seat. */
 function connLogHtml(rows = 4): string {
   const slice = portal.events.slice(-rows);
@@ -1325,8 +1317,6 @@ function render() {
     </header>
     <main>
       <div class="sidebar">
-        <div class="status">${esc(statusLine())}</div>
-        ${portal.events.length ? `<div class="side-conn">${esc(portal.events[portal.events.length - 1]!.text)}</div>` : ""}
         <div class="side-label">people in the room</div>
         <ul class="member-list">
           <li title="this is you">
@@ -1378,7 +1368,6 @@ function render() {
           ${roomAvatarHtml()}
           <div class="tb-body">
             <div class="tb-title">${roomName()}</div>
-            <div class="tb-sub" title="${esc(statusLine())}">${esc(statusLine())}</div>
             <div class="pills">
               <span class="pill ${isEarth() ? "" : "amber"}" title="${isEarth() ? "everyone who uses the word earth meets here" : "only people who typed this room's word can be here"}">${isEarth() ? "public word" : "word room"}</span>
               <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
