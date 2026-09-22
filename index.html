@@ -342,8 +342,9 @@
       <div class="t">word = 1 room</div>
       <div class="d">Type the same word as your friends and you're in the
       same room — the word never leaves your device, and guessing one is
-      made deliberately expensive. Rotate the room key and the door closes
-      behind you, forever.</div>
+      made deliberately expensive. And if a word ever gets out, ✦ Warp
+      moves everyone present into a new universe while the word starts
+      fresh for whoever types it next.</div>
     </div>
   </div>
 
@@ -390,6 +391,7 @@
     <ul>
       <li>Message content — sealed on your device with per-message keys, padded to hide lengths</li>
       <li>Room keys — delivered sealed per member; rotation re-seals under the old key</li>
+      <li>Universes — a ✦ Warp re-keys the room for everyone present; an old universe's key opens nothing new</li>
       <li>Private chats — memory-only, vanish when both sides leave</li>
       <li>Your identity — a keypair that exists only on your device</li>
     </ul>
@@ -440,8 +442,9 @@
   <details name="faq">
     <summary>Who can join Earth?</summary>
     <p>Anyone with the app — or a browser at /join. The first person online
-    creates Earth and hosts it; the host can rotate the key at any moment,
-    which closes the room to newcomers forever.</p>
+    creates Earth and hosts it; the host can ✦ Warp at any moment, moving
+    everyone present to a new universe while the word starts a fresh room
+    for whoever comes next.</p>
   </details>
   <details name="faq">
     <summary>What's a word room?</summary>
@@ -450,6 +453,15 @@
     device — each machine derives the same room from it, through a
     memory-hard function that makes guessing expensive. Roll a generated
     phrase for private rooms; Earth is the public one.</p>
+  </details>
+  <details name="faq">
+    <summary>What is ✦ Warp?</summary>
+    <p>The host's escape hatch, in the browser portal. Warp re-keys the
+    room: everyone present moves together into a new universe, and the word
+    immediately starts a fresh room for whoever types it next. A leaked
+    word stops being a problem — your group is gone, and strangers still
+    get a working room. Each universe is keyed separately; an old
+    universe's key opens nothing new.</p>
   </details>
   <details name="faq">
     <summary>Someone was offline when I sent a message. Is it lost?</summary>
