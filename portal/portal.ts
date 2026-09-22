@@ -138,6 +138,14 @@ export function globalRoomHex(gk: Uint8Array): string {
   return hex(sha256(concat(utf8("OH1-room-v1|"), gk))).slice(0, 32);
 }
 
+/// Deterministic DM room id for a pair — mirrors core rooms.rs dm_hex():
+/// both sides compute the same hex from the sorted peer ids without
+/// coordination. Truncated to the 16-byte RoomId like every room id.
+export function dmRoomHex(egk: Uint8Array, a: string, b: string): string {
+  const [x, y] = a < b ? [a, b] : [b, a];
+  return hex(sha256(concat(utf8("OH1-dm-v1|"), egk, utf8(x), utf8("|"), utf8(y))).subarray(0, 16));
+}
+
 const hkdf32 = (ikm: Uint8Array, salt: Uint8Array, info: Uint8Array): Uint8Array =>
   hkdf(sha256, ikm, salt, info, 32);
 
@@ -151,6 +159,11 @@ const KIND = {
   members: utf8("members\0"),
   clear: utf8("clear\0\0\0"),
   gkDeliv: utf8("gk-deliv"),
+  /// Frames carrying a DM key sealed under the main room key (portal
+  /// extension): only current members can open them, so on earth the
+  /// hub — which stores every mailbox item for 24h — cannot read DM
+  /// keys the way it could the GK-sealed `key_ct_b64` path.
+  dminvite: utf8("dminvite"),
 } as const;
 
 function aad(kind: Uint8Array, room: Uint8Array, epoch: number, sender: string, seq: number): Uint8Array {
@@ -245,6 +258,10 @@ export type Envelope =
   | { Chat: { frame: Sealed } }
   | { Rotate: { frame: Sealed } }
   | { Leave: { room_id_hex: string } }
+  /// Peer -> peer: open (or re-open) a private two-person room. `key_ct_b64`
+  /// is the GK-channel seal shipped apps produce (exact core rooms.rs shape);
+  /// `frame` is the portal's stronger seal under the CURRENT room key.
+  | { DmInvite: { room_id_hex: string; key_ct_b64: string; frame?: Sealed } }
   | { Ack: Record<string, never> }
   | { Error: { message: string } };
 

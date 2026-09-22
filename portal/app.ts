@@ -2,7 +2,7 @@
 // room member. See portal.ts for the protocol mirror + KAT provenance.
 
 import {
-  Hub, RoomCrypto, buildJoin, effectiveGk, globalRoomHex,
+  Hub, RoomCrypto, buildJoin, effectiveGk, globalRoomHex, dmRoomHex,
   openRoomKey, sealRoomKey, peerIdFromPublic, publicKeyProtobuf,
   ed25519RawFromProtobuf, verifyMailItem, admissionProof,
   b64, unb64, unhex, hex, utf8, fromUtf8, concat, type Envelope, type MemberInfo, type Sealed,
@@ -13,6 +13,7 @@ const KIND = {
   chat: utf8("chat\0\0\0\0"),
   rotate: utf8("rotate\0\0"),
   members: utf8("members\0"),
+  dminvite: utf8("dminvite"),
 };
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -48,6 +49,23 @@ const BROWSER = (() => {
 
 interface Msg { ts: number; sender: string; name: string; body: string; out: boolean }
 
+/** One ephemeral two-person room (mirrors core rooms.rs DmRoom): a random
+ *  key only the two peers hold, memory-only, never rotated, delivered
+ *  sealed and never fanned out. */
+interface DmState {
+  peer: string;
+  crypto: RoomCrypto;
+  mySeq: number;
+  seenSeq: number;
+  /// Frames we sealed under our current key — drives split-brain adoption.
+  sent: number;
+  /// True until an inbound frame proves the peer holds our key; the invite
+  /// rides along with every send while set (covers a peer that refreshed).
+  unconfirmed: boolean;
+  msgs: Msg[];
+  unread: number;
+}
+
 /** One line of the connection log — every discovery/seating attempt the
  *  tab makes, so two clients that can't see each other are debuggable at
  *  a glance instead of staring at a spinner. */
@@ -75,6 +93,7 @@ class Portal {
   mySeq = Date.now();
   seenSeq = new Map<string, number>();
   msgs: Msg[] = [];
+  dms = new Map<string, DmState>();
   presenceToken = hex(crypto.getRandomValues(new Uint8Array(16)));
   online = 0;
   status = "starting…";
@@ -437,6 +456,12 @@ class Portal {
       return;
     }
     if ("Chat" in env) {
+      // DM frames belong to a different room id: route before any
+      // main-room state checks (a DM works even while unseated).
+      if (env.Chat.frame.room_id_hex !== this.roomHex) {
+        this.handleDmChat(from, env.Chat.frame);
+        return;
+      }
       if (!this.room) return;
       if (env.Chat.frame.epoch > this.room.epoch) { void this.resync(); return; }
       const body = fromUtf8(this.room.open(env.Chat.frame, KIND.chat));
@@ -470,6 +495,10 @@ class Portal {
       void this.hostHandleJoin(from, env.Join);
       return;
     }
+    if ("DmInvite" in env) {
+      this.handleDmInvite(from, env.DmInvite);
+      return;
+    }
     if ("Leave" in env) {
       if (!this.isHost) return;
       const name = this.members.get(from) ?? from.slice(0, 10);
@@ -479,6 +508,10 @@ class Portal {
       return;
     }
     if ("Error" in env) {
+      // A peer could not open a DM frame (they lost the key to a refresh):
+      // re-invite them with our existing key, like the desktop app does.
+      const lost = /^unknown-room:([0-9a-f]{32})$/.exec(env.Error.message);
+      if (lost && this.dms.has(lost[1]!)) { void this.inviteDm(lost[1]!); return; }
       setStatus(env.Error.message);
     }
   }
@@ -555,6 +588,118 @@ class Portal {
     render();
     await this.fanOut({ Chat: { frame } });
   }
+
+  // ------------------------------------------------------ direct messages
+
+  dmHexFor(peer: string): string {
+    return dmRoomHex(this.egk, this.peerId, peer);
+  }
+
+  /// Open (or re-open) a private chat with `peer`. Idempotent: an existing
+  /// room keeps its key; the invite is resent anyway on the next send.
+  openDm(peer: string): string {
+    const hex = this.dmHexFor(peer);
+    if (!this.dms.has(hex)) {
+      this.dms.set(hex, {
+        peer,
+        crypto: new RoomCrypto(unhex(hex), 1, crypto.getRandomValues(new Uint8Array(32))),
+        mySeq: Date.now(), seenSeq: 0, sent: 0, unconfirmed: true, msgs: [], unread: 0,
+      });
+    }
+    return hex;
+  }
+
+  /// The invite carries BOTH seals: `key_ct_b64` (GK channel — what shipped
+  /// desktop apps open, byte-compatible with core rooms.rs) and, while we
+  /// hold the room key, a frame sealed UNDER the room key (the strong path:
+  /// only current members can open it — the hub never holds that key).
+  buildDmInvite(hex: string): Envelope | null {
+    const dm = this.dms.get(hex);
+    if (!dm) return null;
+    const di: { room_id_hex: string; key_ct_b64: string; frame?: Sealed } = {
+      room_id_hex: hex,
+      key_ct_b64: b64(sealRoomKey(this.egk, dm.crypto.roomId, 1, dm.peer, dm.crypto.key)),
+    };
+    if (this.room) {
+      this.mySeq++;
+      di.frame = this.room.seal(this.peerId, this.mySeq, KIND.dminvite,
+        utf8(JSON.stringify({ key_b64: b64(dm.crypto.key) })));
+    }
+    return { DmInvite: di };
+  }
+
+  async inviteDm(hex: string) {
+    const dm = this.dms.get(hex);
+    const inv = this.buildDmInvite(hex);
+    if (!dm || !inv) return;
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, [{ to: dm.peer, env: inv }]).catch(() => {});
+  }
+
+  async sendDm(hex: string, text: string) {
+    const dm = this.dms.get(hex);
+    if (!dm || !text.trim()) return;
+    dm.mySeq++;
+    dm.sent++;
+    const frame = dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(text));
+    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body: text, out: true });
+    render();
+    const batch: Array<{ to: string; env: Envelope }> = [{ to: dm.peer, env: { Chat: { frame } } }];
+    if (dm.unconfirmed) {
+      const inv = this.buildDmInvite(hex);
+      if (inv) batch.unshift({ to: dm.peer, env: inv });
+    }
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+  }
+
+  /// A Chat frame for a room that is not ours routes to the DM registry.
+  /// Unknown id → the peer holds a key we lost (refresh): say so and they
+  /// re-invite us (mirrors the Rust unknown-room flow).
+  handleDmChat(from: string, frame: Sealed) {
+    const dm = this.dms.get(frame.room_id_hex);
+    if (!dm) {
+      void this.hub.mailPush(this.peerId, this.pubB64, this.sign, from,
+        [{ Error: { message: `unknown-room:${frame.room_id_hex}` } }]).catch(() => {});
+      return;
+    }
+    const body = fromUtf8(dm.crypto.open(frame, KIND.chat));
+    if (frame.seq <= dm.seenSeq) return; // replay guard (per-DM counter)
+    dm.seenSeq = frame.seq;
+    dm.unconfirmed = false;
+    dm.msgs.push({ ts: Date.now(), sender: from, name: this.members.get(from) ?? from.slice(0, 10), body, out: false });
+    if (activeRoom !== frame.room_id_hex) dm.unread++;
+  }
+
+  handleDmInvite(from: string, di: { room_id_hex: string; key_ct_b64: string; frame?: Sealed }) {
+    if (di.room_id_hex === this.roomHex) return; // never via DM mechanics
+    const roomId = unhex(di.room_id_hex);
+    if (roomId.length !== 16) return;
+    let key: Uint8Array | null = null;
+    if (di.frame && this.room) {
+      try {
+        const body = fromUtf8(this.room.open(di.frame, KIND.dminvite));
+        const k = unb64((JSON.parse(body) as { key_b64: string }).key_b64);
+        if (k.length === 32) key = k;
+      } catch { /* fall through to the legacy seal */ }
+    }
+    if (!key) {
+      try { key = openRoomKey(this.egk, roomId, 1, this.peerId, unb64(di.key_ct_b64)); }
+      catch { return; } // not for us / tampered
+    }
+    const have = this.dms.get(di.room_id_hex);
+    if (have) {
+      // Split-brain (both sides minted a key for the same pair): the invite
+      // from the smaller peer id wins, but only if we never sent under ours.
+      if (have.sent > 0 || from >= this.peerId) return;
+    }
+    const name = this.members.get(from) ?? from.slice(0, 10);
+    this.dms.set(di.room_id_hex, {
+      peer: from,
+      crypto: new RoomCrypto(roomId, 1, key),
+      mySeq: Date.now(), seenSeq: 0, sent: 0, unconfirmed: false,
+      msgs: have?.msgs ?? [], unread: have?.unread ?? 0,
+    });
+    this.logConn(`private chat with ${name} opened`, "ok");
+  }
 }
 
 // ------------------------------------------------------------------- UI
@@ -588,6 +733,9 @@ if (vv) {
 function setStatus(s: string) { portal.status = s; render(); }
 
 let view = "gate";
+/// Which conversation the chat pane shows: null = the main room, else a
+/// DM room hex from portal.dms.
+let activeRoom: string | null = null;
 
 /** Stable hue from a peer id — colors avatars and sender labels. */
 function peerHue(peer: string): number {
@@ -721,7 +869,11 @@ function openMenu(anchor: HTMLElement, items: MenuItem[]) {
 }
 function closeMenus() { document.getElementById("open-menu")?.remove(); }
 
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (document.getElementById("open-menu")) { closeMenus(); return; }
+  if (activeRoom) { activeRoom = null; render(); }
+});
 document.addEventListener("click", (e) => {
   const m = document.getElementById("open-menu");
   if (m && !m.contains(e.target as Node)) closeMenus();
@@ -738,8 +890,17 @@ function msgHtml(m: Msg): string {
     <div class="msg in">${esc(m.body)}${meta}</div>`;
 }
 
+/// Unread DMs surface in the tab title — the only channel that signals
+/// while another conversation (or another tab) is in front.
+const BASE_TITLE = document.title;
+function syncTitle() {
+  const n = [...portal.dms.values()].reduce((s, d) => s + d.unread, 0);
+  document.title = n ? `(${n}) ${BASE_TITLE}` : BASE_TITLE;
+}
+
 function render() {
   const root = $("app");
+  syncTitle();
   if (view === "gate") {
     root.innerHTML = `
       <div class="gate">
@@ -764,6 +925,9 @@ function render() {
     return;
   }
   // chat view — the desktop app's three-part shell
+  // Which private conversation is open (null = the main room).
+  const activeDm = activeRoom ? portal.dms.get(activeRoom) ?? null : null;
+  const dmName = (peer: string) => portal.members.get(peer) ?? peer.slice(0, 10);
   // A full re-render fires on every incoming message; keep whatever the
   // user is typing (value + focus) so the composer survives it.
   const prevSend = $("p-send") as HTMLTextAreaElement | null;
@@ -779,9 +943,11 @@ function render() {
     <header class="cmdbar">
       <img class="brandlogo" src="/icon-256.png" alt="">
       <span class="logo">OnlyHumans</span>
-      <span class="roomchip" title="this tab lives in ${isEarth() ? "the Earth room" : "a word room"} — the desktop app keeps history">
-        <span class="rs-glyph">${isEarth() ? "⌂" : "◆"}</span>
-        <span class="rs-label">${isEarth() ? "Main room" : "Code room"}</span>
+      <span class="roomchip" id="p-roomchip" role="button" tabindex="0" aria-haspopup="menu"
+            title="switch between the room and your private chats">
+        <span class="rs-glyph">${activeDm ? "⇄" : isEarth() ? "⌂" : "◆"}</span>
+        <span class="rs-label">${activeDm ? esc(dmName(activeDm.peer)) : isEarth() ? "Main room" : "Code room"}</span>
+        <span class="caret" aria-hidden="true">▾</span>
       </span>
       ${siteDotHtml()}
       <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
@@ -795,7 +961,7 @@ function render() {
         <div class="status">${esc(statusLine())}</div>
         ${portal.events.length ? `<div class="side-conn">${esc(portal.events[portal.events.length - 1]!.text)}</div>` : ""}
         <div class="side-label">this room</div>
-        <div class="roomcard" title="${esc(portal.word)}">
+        <div class="roomcard ${activeDm ? "" : "cur"}" id="p-roomcard" title="back to ${esc(portal.word)}">
           ${MAIN_ROOM_ICON}
           <div class="rc-body">
             <div class="rc-name">${roomName()}</div>
@@ -818,12 +984,38 @@ function render() {
               <span class="mname">${esc(name)}</span>
               <span class="li-sub">via site</span>
             </div>
+            <button class="dm-btn" data-peer="${peer}" title="private chat with ${esc(name)}" aria-label="private chat with ${esc(name)}">⇄</button>
           </li>`).join("")}
         </ul>
+        ${portal.dms.size ? `
+        <div class="side-label">private chats</div>
+        <ul class="member-list dm-list">
+          ${[...portal.dms.entries()].map(([hex, dm]) => `
+          <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${esc(dmName(dm.peer))}">
+            ${avatarHtml(dm.peer, dmName(dm.peer))}
+            <div class="li-body">
+              <span class="mname">${esc(dmName(dm.peer))}</span>
+              <span class="li-sub">${dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two"}</span>
+            </div>
+            ${dm.unread ? `<span class="unread-dot" title="${dm.unread} unread"></span>` : ""}
+          </li>`).join("")}
+        </ul>` : ""}
       </div>
-      ${portal.room ? `
+      ${(portal.room || activeDm) ? `
       <div class="chat">
         <div class="titlebar">
+          ${activeDm ? (() => {
+            const n = dmName(activeDm.peer);
+            return `
+            ${avatarHtml(activeDm.peer, n)}
+            <div class="tb-body">
+              <div class="tb-title">${esc(n)} <span class="pp-pill">private</span></div>
+              <div class="tb-sub">vanishes when you both leave · sealed with a key only you two hold</div>
+            </div>
+            <div class="tb-actions">
+              <button id="p-back" class="btn-ghost" title="back to the room (Esc)">‹ room</button>
+            </div>`;
+          })() : `
           ${MAIN_ROOM_ICON}
           <div class="tb-body">
             <div class="tb-title">${roomName()}</div>
@@ -831,26 +1023,27 @@ function render() {
             <div class="pills">
               <span class="pill ${isEarth() ? "" : "amber"}" title="${isEarth() ? "everyone who uses the word earth meets here" : "only people who typed this room's word can be here"}">${isEarth() ? "public word" : "word room"}</span>
               <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
-              ${portal.room.epoch > 1 ? `<span class="pill">gen ${portal.room.epoch}</span>` : ""}
+              ${portal.room && portal.room.epoch > 1 ? `<span class="pill">gen ${portal.room.epoch}</span>` : ""}
             </div>
           </div>
           <div class="tb-actions">
             <button id="p-members" class="btn-ghost members-btn" title="people in this room">${memberCount} in room</button>
             <button id="p-invite" class="btn-ghost" title="copy a message a friend can follow to land in this room">＋ Invite</button>
-          </div>
+          </div>`}
         </div>
         <div class="messages" id="p-msgs">
-          ${portal.msgs.length === 0 ? `<div class="chat-hint">${isEarth()
+          ${!activeDm && portal.msgs.length === 0 ? `<div class="chat-hint">${isEarth()
             ? (others.length === 0
               ? `You're in Earth — everyone who uses this word joins this room. Say hi, or <button id="p-invite-empty" class="linklike">invite a friend</button>.`
               : "You're in Earth — everyone who uses this word joins this room. Say hi.")
             : (others.length === 0
               ? `Nobody else has used this word yet — they land here the moment they type the same one. <button id="p-invite-empty" class="linklike">Invite someone</button>`
               : "You're in — only people who typed this room's word can be here.")}</div>` : ""}
-          ${portal.msgs.map(msgHtml).join("")}
+          ${activeDm && activeDm.msgs.length === 0 ? `<div class="chat-hint">This is a sealed two-person room — only you and ${esc(dmName(activeDm.peer))} hold this key.</div>` : ""}
+          ${(activeDm ? activeDm.msgs : portal.msgs).map(msgHtml).join("")}
         </div>
         <div class="composer">
-          <textarea id="p-send" rows="1" placeholder="message the room… (Enter sends)" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
+          <textarea id="p-send" rows="1" placeholder="${activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
           <button id="p-sendbtn" class="primary" type="button">Send</button>
         </div>
       </div>` : `
@@ -871,6 +1064,8 @@ function render() {
         label: "Log off",
         hint: "back to the join screen — your key stays in this browser",
         act: () => {
+          portal.dms.clear();
+          activeRoom = null;
           view = "gate";
           render();
           const n = $("p-name") as HTMLInputElement | null;
@@ -883,21 +1078,97 @@ function render() {
   $("p-invite")?.addEventListener("click", () => void copyInvite());
   $("p-invite-empty")?.addEventListener("click", () => void copyInvite());
 
+  // Private chats: the ⇄ chip on a member row opens (or re-opens) one and
+  // mails the invite; the dm rows switch conversations. Row clicks never
+  // start conversations by accident — the chip is the deliberate gesture.
+  document.querySelectorAll<HTMLElement>(".sidebar button.dm-btn").forEach((b) => {
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const hex = portal.openDm(b.dataset.peer!);
+      activeRoom = hex;
+      void portal.inviteDm(hex);
+      render();
+    });
+  });
+  document.querySelectorAll<HTMLElement>(".sidebar li.dmrow").forEach((li) => {
+    li.addEventListener("click", () => {
+      const hex = li.dataset.dm!;
+      const dm = portal.dms.get(hex);
+      if (!dm) return;
+      dm.unread = 0;
+      activeRoom = hex;
+      render();
+    });
+  });
+  $("p-back")?.addEventListener("click", () => { activeRoom = null; render(); });
+  $("p-roomcard")?.addEventListener("click", () => { activeRoom = null; render(); });
+
+  // The roomchip is the conversation switcher — the phone home of the
+  // sidebar's room card + private chats list.
+  const chipSwitch = (el: HTMLElement) => {
+    if (document.getElementById("open-menu")) { closeMenus(); return; }
+    const items: MenuItem[] = [
+      { label: "switch conversation", header: true },
+      {
+        label: `${roomName()} · ${portal.word}`,
+        icon: MAIN_ROOM_ICON,
+        act: () => { activeRoom = null; render(); },
+      },
+    ];
+    for (const [hex, dm] of portal.dms) {
+      const n = dmName(dm.peer);
+      items.push({
+        label: n,
+        hint: dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two",
+        icon: avatarHtml(dm.peer, n),
+        act: () => { dm.unread = 0; activeRoom = hex; render(); },
+      });
+    }
+    openMenu(el, items);
+  };
+  $("p-roomchip")?.addEventListener("click", (e) => { e.stopPropagation(); chipSwitch(e.currentTarget as HTMLElement); });
+  $("p-roomchip")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); chipSwitch(e.currentTarget as HTMLElement); }
+  });
+
   // Phones fold the sidebar away — this button is the mobile home of the
   // member list (and the room card's word/generation facts).
   $("p-members")?.addEventListener("click", (e) => {
     e.stopPropagation();
     const el = e.currentTarget as HTMLElement;
     if (document.getElementById("open-menu")) { closeMenus(); return; }
-    openMenu(el, [
+    const items: MenuItem[] = [
       { label: `people in the room · ${roomName()}`, header: true },
       ...[...portal.members].map(([peer, name]): MenuItem => ({
         label: peer === myId ? `${name} (you)` : name,
         hint: peer === myId ? (portal.isHost ? "this device — holding the room open" : "this device") : peer === portal.hostId ? "holding the room open" : "via site",
         icon: avatarHtml(peer, name),
       })),
-      { label: `${portal.word} · generation ${portal.room?.epoch ?? 1}`, header: true },
-    ]);
+    ];
+    if (others.length) {
+      items.push({ label: "start a private chat", header: true });
+      for (const [peer, name] of others) {
+        items.push({
+          label: `⇄ ${name}`,
+          icon: avatarHtml(peer, name),
+          act: () => { const hex = portal.openDm(peer); activeRoom = hex; void portal.inviteDm(hex); render(); },
+        });
+      }
+    }
+    if (portal.dms.size) {
+      items.push({ label: "private chats", header: true });
+      for (const [hex, dm] of portal.dms) {
+        const n = dmName(dm.peer);
+        items.push({
+          label: n,
+          hint: dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two",
+          icon: avatarHtml(dm.peer, n),
+          act: () => { dm.unread = 0; activeRoom = hex; render(); },
+        });
+      }
+    }
+    items.push({ label: `${portal.word} · generation ${portal.room?.epoch ?? 1}`, header: true });
+    openMenu(el, items);
   });
 
   const ta = $("p-send") as HTMLTextAreaElement | null;
@@ -906,7 +1177,8 @@ function render() {
     if (!v.trim()) { ta!.value = ""; autosize(ta!); return; }
     ta!.value = "";
     autosize(ta!);
-    void portal.send(v);
+    if (activeDm && activeRoom) void portal.sendDm(activeRoom, v);
+    else void portal.send(v);
   };
   if (ta) {
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendIt(); } });
@@ -933,6 +1205,10 @@ async function doJoin() {
   const err = $("p-err")!;
   if (!name) { err.textContent = "A name is required."; return; }
   err.textContent = "";
+  // DM ids and keys bind THIS room's word (egk) — a different room is a
+  // different DM space, so private chats never survive a word change.
+  portal.dms.clear();
+  activeRoom = null;
   // The chat shell renders before portal.join() runs; seed the fields its
   // first paint reads so the room name and word are right immediately.
   portal.name = name;
