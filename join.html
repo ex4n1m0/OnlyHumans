@@ -14,7 +14,7 @@
 <meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="script" href="/join-assets/portal-OJ4FPLDP.js">
+<link rel="preload" as="script" href="/join-assets/portal-SMH4LQWE.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -130,19 +130,13 @@
   .side-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
                 color: var(--muted); padding: 14px 14px 4px; font-weight: 600; }
 
-  /* room card — visually distinct from everything else */
-  .roomcard { display: flex; align-items: center; gap: 10px; margin: 4px 8px 8px;
-              padding: 10px; border-radius: 10px; cursor: default;
-              background: linear-gradient(135deg, #0d2027, #0f2c33);
-              border: 1px solid #1f4652; }
-  .roomcard .rc-body { flex: 1; min-width: 0; }
-  .roomcard .rc-name { font-weight: 700; color: #eafcff; font-size: 13px; }
-  .roomcard .rc-sub { color: var(--muted); font-size: var(--fs-xs); margin-top: 2px; }
-
-  /* avatars */
+  /* avatars — profile photos fill the circle, initials otherwise */
   .avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0;
             display: inline-flex; align-items: center; justify-content: center;
-            font-size: 12px; font-weight: 700; user-select: none; }
+            font-size: 12px; font-weight: 700; user-select: none;
+            position: relative; overflow: hidden; }
+  .avatar img { position: absolute; inset: 0; width: 100%; height: 100%;
+                object-fit: cover; }
   .avatar.roomavatar { background: var(--teal-dim); color: #bff3fa; }
   .avatar.roomavatar svg { width: 18px; height: 18px; }
 
@@ -174,8 +168,24 @@
   .roomchip { cursor: pointer; }
   .roomchip:hover { border-color: var(--teal-dim); }
   .roomchip .caret { color: var(--muted); font-size: 10px; }
-  .roomcard { cursor: pointer; }
-  .roomcard.cur { box-shadow: inset 2px 0 0 var(--teal); }
+
+  /* member-row bios replace "via site" when a peer set one */
+  .member-list .li-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* profile sheet (session-only profile + room picture editor) */
+  .sheetwrap { position: absolute; inset: 0; background: rgba(3, 8, 10, .62);
+               z-index: 30; display: flex; overflow-y: auto; }
+  .sheet { margin: auto; width: min(92vw, 340px); background: var(--panel);
+           border: 1px solid var(--line); border-radius: 12px; padding: 16px;
+           display: flex; flex-direction: column; gap: 8px; }
+  .sheet-title { font-size: 13px; font-weight: 700; color: #fff; margin-top: 4px; }
+  .sheet .pf-label { font-size: 11px; color: var(--muted); }
+  .sheet textarea { resize: none; line-height: 1.4; }
+  .pf-photo { display: flex; align-items: center; gap: 12px; }
+  .pf-photo .avatar { width: 52px; height: 52px; }
+  .pf-photo-btns { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pf-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
+  .pf-note { font-size: 10px; color: var(--muted); }
 
   /* chat */
   .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -302,6 +312,10 @@
   .gate input { width: 100%; min-width: 0; }
   .gaterow input { flex: 1; }
   .gaterow button { flex-shrink: 0; }
+  .gaterem { display: flex; gap: .5rem; align-items: center; margin-top: .7rem;
+             width: 240px; max-width: 100%; font-size: 11px; color: var(--muted);
+             text-align: left; cursor: pointer; }
+  .gaterem input { width: auto; flex-shrink: 0; accent-color: var(--teal); }
   .gatehint { color: var(--danger); font-size: .85rem; margin-top: .4rem; }
   .gatebuild { color: #56707c; font-size: 10px; letter-spacing: .06em; margin-top: .8rem; user-select: none; }
 
@@ -337,6 +351,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-OJ4FPLDP.js" defer></script>
+<script src="/join-assets/portal-SMH4LQWE.js" defer></script>
 </body>
 </html>

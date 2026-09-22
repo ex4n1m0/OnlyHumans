@@ -275,6 +275,13 @@ export type Envelope =
   /// is the GK-channel seal shipped apps produce (exact core rooms.rs shape);
   /// `frame` is the portal's stronger seal under the CURRENT room key.
   | { DmInvite: { room_id_hex: string; key_ct_b64: string; frame?: Sealed } }
+  /// Any member -> every member (portal extension): this peer's current
+  /// profile — display name, small photo, bio, optionally a proposed room
+  /// image — sealed under the room key like chat and sent peer-to-peer
+  /// (never folded into the host's Members fan-out, which would blow the
+  /// 64 KB envelope cap with photos). Shipped desktop apps reject the
+  /// unknown variant at serde and drop it, which is harmless.
+  | { Profile: { frame: Sealed } }
   | { Ack: Record<string, never> }
   | { Error: { message: string } };
 

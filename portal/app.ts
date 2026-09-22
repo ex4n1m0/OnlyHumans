@@ -14,6 +14,7 @@ const KIND = {
   rotate: utf8("rotate\0\0"),
   members: utf8("members\0"),
   dminvite: utf8("dminvite"),
+  profile: utf8("profile\0"),
 };
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -85,9 +86,15 @@ interface ImgMsg { src: string; w: number; h: number }
 interface PendingImg extends ImgPayload { src: string; bytes: number }
 
 const IMG_BUDGET = 30 * 1024;
+const IMG_EDGES = [1280, 1024, 880, 720, 560, 440, 320];
+/// Avatars (profile + room images) render at ≤52 px but may be viewed
+/// larger: a 320 px re-encode under 8 KB is crisp everywhere and keeps a
+/// full profile frame (photo + bio + name) far inside the mail cap.
+const AVATAR_BUDGET = 8 * 1024;
+const AVATAR_EDGES = [320, 256, 192, 160, 128];
 
 let pendingImg: PendingImg | null = null;
-let converting = false;
+let convertingWhat = "";
 
 function payloadToImg(p: ImgPayload): ImgMsg {
   return { src: `data:${p.m};base64,${p.d}`, w: p.w, h: p.h };
@@ -124,12 +131,12 @@ function canWebp(): Promise<boolean> {
 }
 
 /** The automatic converter: decode, then walk a resolution × quality
- *  ladder until the re-encode fits IMG_BUDGET. Typical phone photos land
+ *  ladder until the re-encode fits the budget. Typical phone photos land
  *  at 880–1024 px WebP; every step costs one fast canvas encode. */
-async function fileToImagePayload(file: Blob): Promise<PendingImg> {
+async function fileToImagePayload(file: Blob, budget = IMG_BUDGET, edges: number[] = IMG_EDGES): Promise<PendingImg> {
   const bmp = await createImageBitmap(file); // throws on undecodable (HEIC in Chrome)
   const mime = (await canWebp()) ? "image/webp" : "image/jpeg";
-  for (const edge of [1280, 1024, 880, 720, 560, 440, 320]) {
+  for (const edge of edges) {
     const scale = Math.min(1, edge / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * scale));
     const h = Math.max(1, Math.round(bmp.height * scale));
@@ -146,7 +153,7 @@ async function fileToImagePayload(file: Blob): Promise<PendingImg> {
     ctx.drawImage(bmp, 0, 0, w, h);
     for (const q of [0.75, 0.62, 0.5, 0.4]) {
       const blob = await canvasToBlob(canvas, mime, q);
-      if (blob && blob.type === mime && blob.size <= IMG_BUDGET) {
+      if (blob && blob.type === mime && blob.size <= budget) {
         const d = await blobToStdB64(blob);
         return { d, w, h, m: mime, src: `data:${mime};base64,${d}`, bytes: blob.size };
       }
@@ -155,17 +162,24 @@ async function fileToImagePayload(file: Blob): Promise<PendingImg> {
   throw new Error("shrink");
 }
 
-async function pickImage(file: Blob | null | undefined) {
-  if (!file || converting) return;
-  converting = true;
-  pendingImg = null;
+type PickTarget = "chat" | "avatar" | "room";
+
+async function pickImage(file: Blob | null | undefined, what: PickTarget = "chat") {
+  if (!file || convertingWhat) return;
+  convertingWhat = what;
+  if (what === "chat") pendingImg = null;
   render();
   try {
-    pendingImg = await fileToImagePayload(file);
+    const p = what === "chat"
+      ? await fileToImagePayload(file)
+      : await fileToImagePayload(file, AVATAR_BUDGET, AVATAR_EDGES);
+    if (what === "chat") pendingImg = p;
+    else if (what === "avatar") avatarDraft = p;
+    else roomDraft = p;
   } catch {
-    toast("couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to 30 KB");
+    toast("couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to size on your device");
   } finally {
-    converting = false;
+    convertingWhat = "";
     render();
   }
 }
@@ -211,6 +225,42 @@ imgInput.addEventListener("change", () => {
   void pickImage(f);
 });
 
+function hiddenFilePicker(onPick: (f: Blob) => void): HTMLInputElement {
+  const el = document.createElement("input");
+  el.type = "file";
+  el.accept = "image/*";
+  el.style.display = "none";
+  document.body.appendChild(el);
+  el.addEventListener("change", () => {
+    const f = el.files?.[0];
+    el.value = "";
+    if (f) onPick(f);
+  });
+  return el;
+}
+const avatarInput = hiddenFilePicker((f) => void pickImage(f, "avatar"));
+const roomImgInput = hiddenFilePicker((f) => void pickImage(f, "room"));
+
+// ------------------------------------------------------------ profiles
+// Session-only, room-scoped. Own photo/bio live on the Portal instance;
+// peers' profiles arrive as sealed Profile frames (see Portal.sendOwnProfile)
+// and die with the tab — nothing is stored anywhere.
+
+/// Draft picks inside the profile sheet (null = keep current).
+let avatarDraft: PendingImg | null = null;
+let roomDraft: PendingImg | null = null;
+let avatarRemoved = false;
+let roomRemoved = false;
+let editingProfile = false;
+
+/** A data URL we are willing to render from a peer: whitelisted mime,
+ *  standard-b64 body only, bounded length — this is attribute-injection
+ *  defence, same stance as parseChatBody. */
+function validImgDataUrl(s: unknown): s is string {
+  return typeof s === "string" && s.length <= 16000 &&
+    /^data:image\/(jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(s);
+}
+
 class Portal {
   hub = new Hub("");
   seed!: Uint8Array;
@@ -234,6 +284,16 @@ class Portal {
   seenSeq = new Map<string, number>();
   msgs: Msg[] = [];
   dms = new Map<string, DmState>();
+  /// Own profile (session-wide; survives room switches, dies with the tab).
+  photo = "";
+  bio = "";
+  /// Room image: any member may set one; newest (ts, sender) wins. Word
+  /// rooms are small trusted groups and this is deliberately temporary.
+  roomImg = { img: "", ts: 0, by: "" };
+  /// Peers' profiles learned from sealed Profile frames, room-scoped.
+  profiles = new Map<string, { name?: string; photo?: string; bio?: string; ts: number }>();
+  profSeen = new Map<string, number>();
+  profSentTo = new Map<string, number>();
   presenceToken = hex(crypto.getRandomValues(new Uint8Array(16)));
   online = 0;
   status = "starting…";
@@ -434,7 +494,13 @@ class Portal {
     } catch { /* retry next cycle */ }
   }
 
-  ready() { this.status = ""; render(); }
+  ready() { this.status = ""; render(); this.profilePush(); }
+
+  /** Display name: a peer's profile name beats the host's (possibly
+   *  stale) member list, which beats the raw peer id. */
+  displayName(peer: string): string {
+    return this.profiles.get(peer)?.name ?? this.members.get(peer) ?? peer.slice(0, 10);
+  }
 
   async beat() {
     this.lastBeatAt = Date.now();
@@ -593,6 +659,7 @@ class Portal {
       this.seatAttempts = 0;
       this.status = "";
       this.logConn(`seated by host ${from.slice(0, 8)}… — generation ${kd.epoch}`, "ok");
+      this.profilePush(); // introduce ourselves to the room we just joined
       return;
     }
     if ("Chat" in env) {
@@ -611,7 +678,7 @@ class Portal {
       if (seq <= (this.seenSeq.get(sender) ?? 0)) return; // replay guard
       this.seenSeq.set(sender, seq);
       const pm = parseChatBody(body);
-      this.msgs.push({ ts: Date.now(), sender, name: this.members.get(sender) ?? sender.slice(0, 10), body: pm.text, out: false, img: pm.img });
+      this.msgs.push({ ts: Date.now(), sender, name: this.displayName(sender), body: pm.text, out: false, img: pm.img });
       return;
     }
     if ("Members" in env) {
@@ -621,6 +688,7 @@ class Portal {
       if (from === this.hostId) this.lastHostContact = Date.now();
       const list = (JSON.parse(body) as { members: MemberInfo[] }).members;
       this.members = new Map(list.map((m) => [m.peer, m.name]));
+      this.profilePush(); // someone new may have arrived
       return;
     }
     if ("Rotate" in env) {
@@ -638,6 +706,10 @@ class Portal {
     }
     if ("DmInvite" in env) {
       this.handleDmInvite(from, env.DmInvite);
+      return;
+    }
+    if ("Profile" in env) {
+      this.handleProfileFrame(from, env.Profile.frame);
       return;
     }
     if ("Leave" in env) {
@@ -739,8 +811,70 @@ class Portal {
     await this.fanOut({ Chat: { frame } });
   }
 
-  // ------------------------------------------------------ direct messages
+  // -------------------------------------------------------- own profile
 
+  /** Broadcast this peer's current profile to every room member as a
+   *  sealed Profile frame (one batched mail push; photos are small enough
+   *  that the whole frame stays far under the hub's env cap). */
+  sendOwnProfile(roomImgChanged: boolean) {
+    if (!this.room) return;
+    this.mySeq++;
+    const body: Record<string, unknown> = { n: this.name, p: this.photo, t: Date.now() };
+    if (this.bio) body.b = this.bio;
+    // Only a deliberate room-image change carries `r` — echoing our last
+    // known image with a fresh ts would hijack it from whoever set it.
+    if (roomImgChanged) body.r = this.roomImg.img;
+    const frame = this.room.seal(this.peerId, this.mySeq, KIND.profile, utf8(JSON.stringify(body)), true);
+    const env: Envelope = { Profile: { frame } };
+    if (!mailFits(env)) return; // 8 KB avatars always fit; guard is a backstop
+    const targets = [...this.members.keys()].filter((p) => p !== this.peerId);
+    for (const p of targets) this.profSentTo.set(p, Date.now());
+    const batch = targets.map((to) => ({ to, env }));
+    if (batch.length) void this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+  }
+
+  /** Re-introduce ourselves to members we haven't told recently (seating,
+   *  membership changes) — new joiners learn names from the host's member
+   *  list and faces/bios from these frames. */
+  profilePush() {
+    if (!this.room) return;
+    const now = Date.now();
+    const stale = [...this.members.keys()].some((p) =>
+      p !== this.peerId && now - (this.profSentTo.get(p) ?? 0) > 120_000);
+    if (stale) this.sendOwnProfile(false);
+  }
+
+  /** A peer's sealed Profile frame: merge name/photo/bio, converge the
+   *  room image, and (as host) keep the canonical member names fresh so
+   *  later joiners hear the current display name from the seat delivery. */
+  handleProfileFrame(from: string, frame: Sealed) {
+    if (!this.room || frame.room_id_hex !== this.roomHex) return;
+    if (frame.epoch > this.room.epoch) { void this.resync(); return; }
+    if (frame.seq <= (this.profSeen.get(from) ?? 0)) return; // replay guard
+    this.profSeen.set(from, frame.seq);
+    if (from === this.hostId) this.lastHostContact = Date.now();
+    let j: any;
+    try { j = JSON.parse(fromUtf8(this.room.open(frame, KIND.profile))); } catch { return; }
+    const prof = this.profiles.get(from) ?? { ts: 0 };
+    prof.ts = Number(j.t) || Date.now();
+    if (typeof j.n === "string" && j.n.trim()) prof.name = j.n.trim().slice(0, 32);
+    if (typeof j.b === "string") prof.bio = j.b.slice(0, 120);
+    if (j.p === "" || j.p === undefined) delete prof.photo;
+    else if (validImgDataUrl(j.p)) prof.photo = j.p;
+    this.profiles.set(from, prof);
+    if (this.isHost && prof.name && this.members.get(from) !== prof.name) {
+      this.members.set(from, prof.name);
+      void this.broadcastMembers();
+    }
+    if (typeof j.r === "string" && (j.r === "" || validImgDataUrl(j.r))) {
+      const t = Number(j.t) || 0;
+      if (t > this.roomImg.ts || (t === this.roomImg.ts && from > this.roomImg.by)) {
+        this.roomImg = { img: j.r, ts: t, by: from };
+      }
+    }
+  }
+
+  // ------------------------------------------------------ direct messages
   dmHexFor(peer: string): string {
     return dmRoomHex(this.egk, this.peerId, peer);
   }
@@ -825,7 +959,7 @@ class Portal {
     dm.seenSeq = frame.seq;
     dm.unconfirmed = false;
     const pm = parseChatBody(body);
-    dm.msgs.push({ ts: Date.now(), sender: from, name: this.members.get(from) ?? from.slice(0, 10), body: pm.text, out: false, img: pm.img });
+    dm.msgs.push({ ts: Date.now(), sender: from, name: this.displayName(from), body: pm.text, out: false, img: pm.img });
     if (activeRoom !== frame.room_id_hex) dm.unread++;
   }
 
@@ -904,11 +1038,27 @@ function peerHue(peer: string): number {
   return h % 360;
 }
 
-/** Round avatar: initials for people, a mesh glyph for the room. */
-function avatarHtml(peer: string, label: string): string {
+/** Round avatar: a profile photo when the peer has one (or the room has
+ *  an image), initials otherwise. */
+function avatarHtml(peer: string, label: string, photo = ""): string {
   const hue = peerHue(peer);
+  if (photo) return `<span class="avatar" style="background:hsl(${hue} 40% 28%)"><img src="${photo}" alt=""></span>`;
   const initials = (label.replace(/\s+/g, "").slice(0, 2) || "?").toUpperCase();
   return `<span class="avatar" style="background:hsl(${hue} 40% 28%);color:hsl(${hue} 70% 75%)">${esc(initials)}</span>`;
+}
+
+const photoOf = (peer: string): string =>
+  (peer === portal.peerId ? portal.photo : portal.profiles.get(peer)?.photo) || "";
+const bioOf = (peer: string): string =>
+  (peer === portal.peerId ? portal.bio : portal.profiles.get(peer)?.bio) || "";
+
+/** The room's titlebar glyph: the room image when a member set one, the
+ *  mesh glyph otherwise. */
+function roomAvatarHtml(): string {
+  if (portal.roomImg.img) {
+    return `<span class="avatar roomavatar"><img src="${portal.roomImg.img}" alt=""></span>`;
+  }
+  return MAIN_ROOM_ICON;
 }
 
 const MAIN_ROOM_ICON = `<span class="avatar roomavatar">
@@ -1032,6 +1182,7 @@ function closeMenus() { document.getElementById("open-menu")?.remove(); }
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (document.getElementById("open-menu")) { closeMenus(); return; }
+  if (editingProfile) { editingProfile = false; avatarDraft = null; roomDraft = null; render(); return; }
   if (activeRoom) { activeRoom = null; render(); }
 });
 document.addEventListener("click", (e) => {
@@ -1063,22 +1214,61 @@ function syncTitle() {
   document.title = n ? `(${n}) ${BASE_TITLE}` : BASE_TITLE;
 }
 
+// ---------------------------------------------------- remembered identity
+// Strictly opt-in: with the box checked, the name and the recently used
+// room words persist in localStorage so returning visitors skip the
+// typing; unchecked scrubs them (the identity seed is separate and always
+// stays — it's the keypair, not a preference).
+
+interface Remembered { on: boolean; name: string; last: string; rooms: string[] }
+
+function rememberState(): Remembered {
+  try {
+    const j = JSON.parse(localStorage.getItem("oh-portal-remember") ?? "null") as Partial<Remembered> | null;
+    if (!j || typeof j !== "object") return { on: false, name: "", last: "", rooms: [] };
+    return {
+      on: j.on === true,
+      name: typeof j.name === "string" ? j.name : "",
+      last: typeof j.last === "string" ? j.last : "",
+      rooms: Array.isArray(j.rooms) ? j.rooms.filter((w): w is string => typeof w === "string").slice(0, 8) : [],
+    };
+  } catch {
+    return { on: false, name: "", last: "", rooms: [] };
+  }
+}
+
+function saveRemember(on: boolean, name: string, word: string) {
+  if (!on) {
+    localStorage.removeItem("oh-portal-remember");
+    return;
+  }
+  const prev = rememberState();
+  const rooms = [word, ...prev.rooms.filter((w) => w !== word)].slice(0, 8);
+  localStorage.setItem("oh-portal-remember", JSON.stringify({ on: true, name, last: word, rooms }));
+}
+
 function render() {
   const root = $("app");
   syncTitle();
   if (view === "gate") {
+    const rem = rememberState();
     root.innerHTML = `
       <div class="gate">
         <div class="gate-inner">
           <img class="gate-logo" src="/icon-256.png" alt="">
           <h2>Every word is a room</h2>
           <div class="gaterow">
-            <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false">
+            <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(rem.on ? rem.name : "")}">
           </div>
           <div class="gaterow">
-            <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false">
+            <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false" list="p-rooms" value="${esc(rem.on ? rem.last : "")}">
             <button id="p-join" class="primary" type="button">Enter the room</button>
           </div>
+          <datalist id="p-rooms">${rem.rooms.map((w) => `<option value="${esc(w)}"></option>`).join("")}</datalist>
+          <label class="gaterem" title="saves your name and your recently used room words in this browser — nothing else, and unchecking removes it">
+            <input type="checkbox" id="p-remember" ${rem.on ? "checked" : ""}>
+            <span>remember my name and rooms on this device</span>
+          </label>
           <p class="gatehint" id="p-err"></p>
           <p class="gatebuild">browser portal · build ${BUILD}</p>
         </div>
@@ -1092,12 +1282,24 @@ function render() {
   // chat view — the desktop app's three-part shell
   // Which private conversation is open (null = the main room).
   const activeDm = activeRoom ? portal.dms.get(activeRoom) ?? null : null;
-  const dmName = (peer: string) => portal.members.get(peer) ?? peer.slice(0, 10);
+  const dmName = (peer: string) => portal.displayName(peer);
   // A full re-render fires on every incoming message; keep whatever the
   // user is typing (value + focus) so the composer survives it.
   const prevSend = $("p-send") as HTMLTextAreaElement | null;
   const sendState = prevSend
     ? { value: prevSend.value, focused: document.activeElement === prevSend }
+    : null;
+  // The profile sheet survives re-renders the same way (a full re-render
+  // fires on every incoming message).
+  const prevSheetName = $("pf-name") as HTMLInputElement | null;
+  const prevSheetBio = $("pf-bio") as HTMLTextAreaElement | null;
+  const sheetState = prevSheetName
+    ? {
+        name: prevSheetName.value,
+        bio: prevSheetBio?.value ?? "",
+        focusName: document.activeElement === prevSheetName,
+        focusBio: document.activeElement === prevSheetBio,
+      }
     : null;
   // peerId is unset until portal.join() mints the identity; render runs
   // before that, so fall back to the empty id (hue 0) for the first paint.
@@ -1116,7 +1318,7 @@ function render() {
       </span>
       ${siteDotHtml()}
       <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
-        ${avatarHtml(myId, portal.name || "you")}
+        ${avatarHtml(myId, portal.name || "you", photoOf(myId))}
         <span class="idname">${esc(portal.name)}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </button>
@@ -1125,31 +1327,23 @@ function render() {
       <div class="sidebar">
         <div class="status">${esc(statusLine())}</div>
         ${portal.events.length ? `<div class="side-conn">${esc(portal.events[portal.events.length - 1]!.text)}</div>` : ""}
-        <div class="side-label">this room</div>
-        <div class="roomcard ${activeDm ? "" : "cur"}" id="p-roomcard" title="back to ${esc(portal.word)}">
-          ${MAIN_ROOM_ICON}
-          <div class="rc-body">
-            <div class="rc-name">${roomName()}</div>
-            <div class="rc-sub">${memberCount} member${memberCount === 1 ? "" : "s"} · ${isEarth() ? "the public word" : "same word"}</div>
-          </div>
-        </div>
         <div class="side-label">people in the room</div>
         <ul class="member-list">
           <li title="this is you">
-            ${avatarHtml(myId, portal.name)}
+            ${avatarHtml(myId, portal.name, photoOf(myId))}
             <div class="li-body">
               <span class="mname">${esc(portal.name)} (you)</span>
-              <span class="li-sub">you</span>
+              <span class="li-sub" title="${esc(portal.bio)}">${esc(portal.bio || "you")}</span>
             </div>
           </li>
-          ${others.map(([peer, name]) => `
-          <li>
-            ${avatarHtml(peer, name)}
+          ${others.map(([peer]) => `
+          <li title="${esc(bioOf(peer))}">
+            ${avatarHtml(peer, dmName(peer), photoOf(peer))}
             <div class="li-body">
-              <span class="mname">${esc(name)}</span>
-              <span class="li-sub">via site</span>
+              <span class="mname">${esc(dmName(peer))}</span>
+              <span class="li-sub">${esc(bioOf(peer) || "via site")}</span>
             </div>
-            <button class="dm-btn" data-peer="${peer}" title="private chat with ${esc(name)}" aria-label="private chat with ${esc(name)}">⇄</button>
+            <button class="dm-btn" data-peer="${peer}" title="private chat with ${esc(dmName(peer))}" aria-label="private chat with ${esc(dmName(peer))}">⇄</button>
           </li>`).join("")}
         </ul>
         ${portal.dms.size ? `
@@ -1157,7 +1351,7 @@ function render() {
         <ul class="member-list dm-list">
           ${[...portal.dms.entries()].map(([hex, dm]) => `
           <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${esc(dmName(dm.peer))}">
-            ${avatarHtml(dm.peer, dmName(dm.peer))}
+            ${avatarHtml(dm.peer, dmName(dm.peer), photoOf(dm.peer))}
             <div class="li-body">
               <span class="mname">${esc(dmName(dm.peer))}</span>
               <span class="li-sub">${dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two"}</span>
@@ -1172,7 +1366,7 @@ function render() {
           ${activeDm ? (() => {
             const n = dmName(activeDm.peer);
             return `
-            ${avatarHtml(activeDm.peer, n)}
+            ${avatarHtml(activeDm.peer, n, photoOf(activeDm.peer))}
             <div class="tb-body">
               <div class="tb-title">${esc(n)} <span class="pp-pill">private</span></div>
               <div class="tb-sub">vanishes when you both leave · sealed with a key only you two hold</div>
@@ -1181,7 +1375,7 @@ function render() {
               <button id="p-back" class="btn-ghost" title="back to the room (Esc)">‹ room</button>
             </div>`;
           })() : `
-          ${MAIN_ROOM_ICON}
+          ${roomAvatarHtml()}
           <div class="tb-body">
             <div class="tb-title">${roomName()}</div>
             <div class="tb-sub" title="${esc(statusLine())}">${esc(statusLine())}</div>
@@ -1207,9 +1401,9 @@ function render() {
           ${activeDm && activeDm.msgs.length === 0 ? `<div class="chat-hint">This is a sealed two-person room — only you and ${esc(dmName(activeDm.peer))} hold this key.</div>` : ""}
           ${(activeDm ? activeDm.msgs : portal.msgs).map(msgHtml).join("")}
         </div>
-        ${(pendingImg || converting) ? `
+        ${(pendingImg || convertingWhat === "chat") ? `
         <div class="imgqueue">
-          ${converting || !pendingImg ? `<span class="spin"></span><span class="iq-meta">shrinking the image to 30 KB…</span>` : `
+          ${convertingWhat === "chat" || !pendingImg ? `<span class="spin"></span><span class="iq-meta">shrinking the image to 30 KB…</span>` : `
             <img class="iq-thumb" src="${pendingImg.src}" alt="">
             <span class="iq-meta">${(pendingImg.bytes / 1024).toFixed(1)} KB · ${pendingImg.w}×${pendingImg.h} · ready — Enter sends</span>
             <button id="p-imgx" class="iq-x" type="button" title="remove the image" aria-label="remove the image">✕</button>`}
@@ -1227,6 +1421,50 @@ function render() {
       </div>`}
     </main>`;
 
+  // Profile sheet — a modal over the shell (inside #app so the iOS
+  // keyboard can't cover it; same pattern as the toasts).
+  if (editingProfile) {
+    const ownPhoto = avatarDraft?.src ?? (avatarRemoved ? "" : portal.photo);
+    const roomPhoto = roomDraft?.src ?? (roomRemoved ? "" : portal.roomImg.img);
+    root.insertAdjacentHTML("beforeend", `
+      <div class="sheetwrap" id="pf-wrap">
+        <div class="sheet" role="dialog" aria-label="edit your profile">
+          <div class="sheet-title">Your profile</div>
+          <div class="pf-photo">
+            ${avatarHtml(portal.peerId || "", portal.name || "you", ownPhoto)}
+            <div class="pf-photo-btns">
+              <button id="pf-photo" type="button">Photo…</button>
+              ${ownPhoto ? `<button id="pf-photo-x" type="button" class="linklike">remove</button>` : ""}
+              ${convertingWhat === "avatar" ? `<span class="spin"></span>` : ""}
+            </div>
+          </div>
+          <label class="pf-label" for="pf-name">name</label>
+          <input id="pf-name" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(sheetState?.name ?? portal.name)}">
+          <label class="pf-label" for="pf-bio">bio</label>
+          <textarea id="pf-bio" maxlength="120" rows="2" placeholder="a line about you — shown to people in the room"></textarea>
+          <div class="sheet-title">This room's picture</div>
+          <div class="pf-photo">
+            ${roomPhoto ? `<span class="avatar roomavatar"><img src="${roomPhoto}" alt=""></span>` : MAIN_ROOM_ICON}
+            <div class="pf-photo-btns">
+              <button id="pf-room" type="button">Picture…</button>
+              ${roomPhoto ? `<button id="pf-room-x" type="button" class="linklike">remove</button>` : ""}
+              ${convertingWhat === "room" ? `<span class="spin"></span>` : ""}
+            </div>
+          </div>
+          <div class="pf-actions">
+            <button id="pf-cancel" type="button">Cancel</button>
+            <button id="pf-save" class="primary" type="button">Save</button>
+          </div>
+          <p class="pf-note">Everything here is session-only — it travels sealed to people in the room and vanishes when the tab closes. Nothing is stored anywhere.</p>
+        </div>
+      </div>`);
+    const bioEl = $("pf-bio") as HTMLTextAreaElement | null;
+    if (bioEl && sheetState) bioEl.value = sheetState.bio;
+    const nameEl = $("pf-name") as HTMLInputElement | null;
+    if (nameEl && sheetState?.focusName) nameEl.focus();
+    if (bioEl && sheetState?.focusBio) bioEl.focus();
+  }
+
   $("p-idmenu")?.addEventListener("click", (e) => {
     e.stopPropagation(); // don't let the outside-click closer eat this menu
     const el = e.currentTarget as HTMLElement;
@@ -1234,11 +1472,25 @@ function render() {
     openMenu(el, [
       { label: `${portal.name} · portal build ${BUILD}`, header: true },
       {
+        label: "Edit profile",
+        hint: portal.bio ? portal.bio.slice(0, 48) : "photo · bio · this room's picture",
+        icon: avatarHtml(portal.peerId || "", portal.name || "you", photoOf(portal.peerId)),
+        act: () => {
+          editingProfile = true;
+          avatarDraft = null;
+          roomDraft = null;
+          avatarRemoved = false;
+          roomRemoved = false;
+          render();
+        },
+      },
+      {
         label: "Log off",
         hint: "back to the join screen — your key stays in this browser",
         act: () => {
           portal.dms.clear();
           activeRoom = null;
+          editingProfile = false;
           view = "gate";
           render();
           const n = $("p-name") as HTMLInputElement | null;
@@ -1274,7 +1526,48 @@ function render() {
     });
   });
   $("p-back")?.addEventListener("click", () => { activeRoom = null; render(); });
-  $("p-roomcard")?.addEventListener("click", () => { activeRoom = null; render(); });
+
+  // Profile sheet interactions. Everything applies on Save (Cancel
+  // discards); photo picks preview live via avatarDraft/roomDraft.
+  $("pf-cancel")?.addEventListener("click", () => {
+    editingProfile = false;
+    avatarDraft = null;
+    roomDraft = null;
+    avatarRemoved = false;
+    roomRemoved = false;
+    render();
+  });
+  $("pf-photo")?.addEventListener("click", () => avatarInput.click());
+  $("pf-photo-x")?.addEventListener("click", () => { avatarDraft = null; avatarRemoved = true; render(); });
+  $("pf-room")?.addEventListener("click", () => roomImgInput.click());
+  $("pf-room-x")?.addEventListener("click", () => { roomDraft = null; roomRemoved = true; render(); });
+  $("pf-wrap")?.addEventListener("click", (e) => {
+    if (e.target === $("pf-wrap")) ($("pf-cancel") as HTMLElement).click();
+  });
+  $("pf-save")?.addEventListener("click", () => {
+    const nameEl = $("pf-name") as HTMLInputElement | null;
+    const bioEl = $("pf-bio") as HTMLTextAreaElement | null;
+    const name = (nameEl?.value ?? "").trim().slice(0, 32);
+    const bio = (bioEl?.value ?? "").trim().slice(0, 120);
+    if (!name) { toast("A name is required."); return; }
+    portal.name = name;
+    portal.bio = bio;
+    if (avatarDraft) portal.photo = avatarDraft.src;
+    else if (avatarRemoved) portal.photo = "";
+    const roomChanged = !!(roomDraft || roomRemoved);
+    if (roomChanged) {
+      portal.roomImg = { img: roomDraft?.src ?? "", ts: Date.now(), by: portal.peerId };
+    }
+    editingProfile = false;
+    avatarDraft = null;
+    roomDraft = null;
+    avatarRemoved = false;
+    roomRemoved = false;
+    // Keep the remembered name fresh when remembering is on.
+    if (rememberState().on) saveRemember(true, name, rememberState().last || portal.word);
+    portal.sendOwnProfile(roomChanged);
+    render();
+  });
 
   // The roomchip is the conversation switcher — the phone home of the
   // sidebar's room card + private chats list.
@@ -1284,7 +1577,7 @@ function render() {
       { label: "switch conversation", header: true },
       {
         label: `${roomName()} · ${portal.word}`,
-        icon: MAIN_ROOM_ICON,
+        icon: roomAvatarHtml(),
         act: () => { activeRoom = null; render(); },
       },
     ];
@@ -1293,7 +1586,7 @@ function render() {
       items.push({
         label: n,
         hint: dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two",
-        icon: avatarHtml(dm.peer, n),
+        icon: avatarHtml(dm.peer, n, photoOf(dm.peer)),
         act: () => { dm.unread = 0; activeRoom = hex; render(); },
       });
     }
@@ -1313,17 +1606,19 @@ function render() {
     const items: MenuItem[] = [
       { label: `people in the room · ${roomName()}`, header: true },
       ...[...portal.members].map(([peer, name]): MenuItem => ({
-        label: peer === myId ? `${name} (you)` : name,
-        hint: peer === myId ? (portal.isHost ? "this device — holding the room open" : "this device") : peer === portal.hostId ? "holding the room open" : "via site",
-        icon: avatarHtml(peer, name),
+        label: peer === myId ? `${portal.displayName(peer)} (you)` : portal.displayName(peer),
+        hint: peer === myId
+          ? (portal.bio || (portal.isHost ? "this device — holding the room open" : "this device"))
+          : bioOf(peer) || (peer === portal.hostId ? "holding the room open" : "via site"),
+        icon: avatarHtml(peer, name, photoOf(peer)),
       })),
     ];
     if (others.length) {
       items.push({ label: "start a private chat", header: true });
       for (const [peer, name] of others) {
         items.push({
-          label: `⇄ ${name}`,
-          icon: avatarHtml(peer, name),
+          label: `⇄ ${portal.displayName(peer)}`,
+          icon: avatarHtml(peer, name, photoOf(peer)),
           act: () => { const hex = portal.openDm(peer); activeRoom = hex; void portal.inviteDm(hex); render(); },
         });
       }
@@ -1335,7 +1630,7 @@ function render() {
         items.push({
           label: n,
           hint: dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two",
-          icon: avatarHtml(dm.peer, n),
+          icon: avatarHtml(dm.peer, n, photoOf(dm.peer)),
           act: () => { dm.unread = 0; activeRoom = hex; render(); },
         });
       }
@@ -1415,10 +1710,18 @@ async function doJoin() {
   const err = $("p-err")!;
   if (!name) { err.textContent = "A name is required."; return; }
   err.textContent = "";
+  saveRemember(($("p-remember") as HTMLInputElement | null)?.checked ?? false, name, word);
   // DM ids and keys bind THIS room's word (egk) — a different room is a
   // different DM space, so private chats never survive a word change.
+  // Peers' profiles and the room image are room-scoped the same way; our
+  // own photo/bio carry over (they are the user's, not the room's).
   portal.dms.clear();
+  portal.profiles.clear();
+  portal.profSeen.clear();
+  portal.profSentTo.clear();
+  portal.roomImg = { img: "", ts: 0, by: "" };
   activeRoom = null;
+  editingProfile = false;
   // The chat shell renders before portal.join() runs; seed the fields its
   // first paint reads so the room name and word are right immediately.
   portal.name = name;
