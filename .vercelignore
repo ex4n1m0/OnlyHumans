@@ -17,3 +17,5 @@ portal/
 gk.json
 # README-only assets (referenced from GitHub, not from any served page).
 screenshots/
+# Internal design notes — not part of the public site.
+docs/
