@@ -52,7 +52,7 @@ http.createServer(async (req, res) => {
       res.end(fs.readFileSync(GK_JSON));
       return;
     }
-    let p = url.pathname === "/" ? "/join.html" : decodeURIComponent(url.pathname);
+    let p = url.pathname === "/" || url.pathname === "/join" ? "/join.html" : decodeURIComponent(url.pathname);
     p = p.split("/").filter((seg) => seg !== ".." && seg !== ".").join("/");
     const file = path.join(ROOT, p);
     if (!file.startsWith(ROOT) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {

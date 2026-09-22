@@ -1081,8 +1081,15 @@ function connLogHtml(rows = 4): string {
   return slice.map((e) => `<div class="cl-row ${e.kind}"><span class="cl-ts">${fmt(e.ts)}</span>${esc(e.text)}</div>`).join("");
 }
 
+/// The invite is a link that pre-fills the room word: /join#room=<word>.
+/// The word rides in the HASH so it never leaves the recipient's browser —
+/// no server, CDN, or log ever sees it (same rule as the protocol: the
+/// word only ever travels inside sealed envelopes).
+const inviteUrl = () =>
+  `${location.origin}/join#room=${encodeURIComponent(portal.word)}`;
+
 const inviteText = () =>
-  `Get OnlyHumans at onlyhumans.deepflux.space — install it, enter any name, then use the room word: ${portal.word}`;
+  `Join me in a room on OnlyHumans — open this link, type any name, press Enter: ${inviteUrl()}`;
 
 async function copyInvite() {
   const t = inviteText();
@@ -1093,8 +1100,15 @@ async function copyInvite() {
     ta.value = t; document.body.appendChild(ta); ta.select();
     document.execCommand("copy"); ta.remove();
   }
-  toast("Invite copied — paste it to a friend");
+  toast("Invite link copied — the room word is already inside it");
 }
+
+/// A word arriving via an invite link, read once at boot; it outranks the
+/// remembered last room (an explicit link is the fresher intent).
+const invitedWord = (() => {
+  const h = location.hash.startsWith("#") ? location.hash.slice(1) : "";
+  return (new URLSearchParams(h).get("room") ?? "").trim().slice(0, 64);
+})();
 
 // Site link: green only while a presence round-trip actually completed
 // (same 6-minute staleness rule as the desktop app). beat() sets siteOk
@@ -1253,7 +1267,7 @@ function render() {
             <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(rem.on ? rem.name : "")}">
           </div>
           <div class="gaterow">
-            <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false" list="p-rooms" value="${esc(rem.on ? rem.last : "")}">
+            <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false" list="p-rooms" value="${esc(invitedWord || (rem.on ? rem.last : ""))}">
             <button id="p-join" class="primary" type="button">Enter the room</button>
           </div>
           <datalist id="p-rooms">${rem.rooms.map((w) => `<option value="${esc(w)}"></option>`).join("")}</datalist>
@@ -1376,7 +1390,7 @@ function render() {
           </div>
           <div class="tb-actions">
             <button id="p-members" class="btn-ghost members-btn" title="people in this room">${memberCount} in room</button>
-            <button id="p-invite" class="btn-ghost" title="copy a message a friend can follow to land in this room">＋ Invite</button>
+            <button id="p-invite" class="btn-ghost" title="copy a link that opens this room — the word is already in it">＋ Invite</button>
           </div>`}
         </div>
         <div class="messages" id="p-msgs">
