@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>OnlyHumans — every word is a room</title>
-<meta name="description" content="Every word is a room. “Earth” is the room everyone shares; your own word is a room only your people can find. Sealed end-to-end, no accounts, no servers reading your words.">
+<meta name="description" content="Every word is a room. “Earth” is the room everyone shares; your own word is a room only your people can find. End-to-end encrypted, no accounts, no servers reading your words.">
 <meta name="theme-color" content="#000000">
 <link rel="canonical" href="https://onlyhumans.deepflux.space/">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://onlyhumans.deepflux.space/">
 <meta property="og:title" content="OnlyHumans — every word is a room">
-<meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
+<meta property="og:description" content="Type your own word and only your people can find you. End-to-end encrypted — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
@@ -121,8 +121,6 @@
     transition: transform .12s ease, box-shadow .12s ease;
   }
   a.dl:hover { transform: translateY(-1px); box-shadow: 0 10px 30px rgba(23,162,184,.35); }
-  .dl-note { font-size: .85rem; color: var(--muted); line-height: 1.6;
-             margin-top: .5rem; }
 
   /* The mesh spans the whole hero behind the content at half opacity —
      the logo is the hero, the network is the atmosphere. */
@@ -223,8 +221,6 @@
       scrollbar-width: none; padding: .15rem .1rem .3rem;
     }
     nav .links::-webkit-scrollbar { display: none; }
-    .dl-box { gap: .8rem; }
-    .dl-note { margin-top: .35rem; }
   }
   @media (pointer: coarse) {
     .layer-tabs button { padding: .65rem 1.25rem; }
@@ -259,10 +255,12 @@
         <img class="hero-logo" src="/logo.png" alt="OnlyHumans logo" width="1254" height="1254" decoding="async" fetchpriority="high">
       </picture>
       <h1>Every word is a <em>room</em>.</h1>
-      <p class="lead">Type a word, and you enter a space only the people who
-      know it can find. That word never leaves your device.</p>
-      <p class="lead">Messages are sealed end-to-end and sent directly between
-      you — this site never sees the word.</p>
+      <p class="lead">Choose a word and share it with the people you want to
+      talk to — everyone who types it lands in the same private room. The
+      word never leaves your device.</p>
+      <p class="lead">Messages are end-to-end encrypted and travel directly
+      between members. No accounts, nothing to install, and no server that
+      can read them.</p>
 
       <p class="hero-live" id="hero-live" hidden>
         <span class="live-dot" aria-hidden="true"></span>
@@ -277,9 +275,6 @@
           </svg>
           <span>Join from your browser</span>
         </a>
-        <span class="dl-note">Pick a name and a room word and you're in — Earth
-        for everyone, your own word for just your people. Nothing to install,
-        no account to create.</span>
       </div>
     </div>
   </div>
@@ -311,8 +306,9 @@
     <div class="stat">
       <div class="n">0</div>
       <div class="t">servers read your words</div>
-      <div class="d">Every message gets its own key, on your device. The
-      site only ever holds addresses and sealed mail it cannot read.</div>
+      <div class="d">Every message is encrypted with its own key, on your
+      device. The server only ever holds addresses and sealed messages it
+      cannot read.</div>
     </div>
     <div class="stat">
       <div class="n">0</div>
@@ -324,8 +320,7 @@
       <div class="n">1</div>
       <div class="t">word = 1 room</div>
       <div class="d">Type the same word as your friends and you're in the
-      same room — the word never leaves your device, and guessing one is
-      made deliberately expensive.</div>
+      same room. Guessing someone else's word is deliberately expensive.</div>
     </div>
   </div>
 
@@ -338,34 +333,34 @@
     </div>
     <div class="layer" id="layer-find" role="tabpanel" aria-labelledby="tab-find">
       <h3>Finding each other <span class="tag">signed · expiring · unreadable</span></h3>
-      <p>Your identity is a keypair generated on your device — no accounts, no
-      phone numbers. The only shared service is this site: a signed, expiring
-      {peer → address} directory, plus a signed pointer saying who currently
-      hosts each room. Peers verify every record themselves; the hub stores
-      bytes it cannot forge and cannot read.</p>
+      <p>Your identity is a key pair generated on your device — no accounts,
+      no phone numbers. The only shared service is this site: a signed,
+      expiring directory of member addresses, plus a signed note of who
+      currently hosts each room. Members verify every record themselves;
+      the server stores bytes it can neither forge nor read.</p>
     </div>
     <div class="layer" id="layer-talk" hidden role="tabpanel" aria-labelledby="tab-talk">
       <h3>Talking <span class="tag">direct · end-to-end · padded</span></h3>
-      <p>When you join, the host hands you the room key — sealed for you
-      alone — and you talk straight to everyone in the room. Every message
-      gets its own key, frames are padded so even their lengths stay quiet,
-      and the relay path, if your network needs one, carries only
+      <p>When you join, the host hands you the room key, sealed for you
+      alone, and you talk directly with everyone in the room. Every message
+      is encrypted with its own key and padded so even its length reveals
+      nothing; a relay, if your network needs one, carries only
       ciphertext.</p>
     </div>
     <div class="layer" id="layer-fallback" hidden role="tabpanel" aria-labelledby="tab-fallback">
       <h3>When two people can't connect <span class="tag">sealed · signed · timestamped</span></h3>
-      <p>Hard networks happen. When direct delivery fails, sealed envelopes
-      wait in a signed hub inbox and drain through this site — within a minute
-      or two — so delivery no longer needs both sides online at once. The
-      inbox carries only ciphertext; the recipient verifies every sender, and
-      the hub still can't read, forge, or alter a single word. Delivered this
-      way, the message is marked <b>⇄ site</b>.</p>
+      <p>When two devices can't connect directly, sealed envelopes wait in a
+      signed server inbox and drain through this site — usually within a
+      minute or two — so delivery no longer requires both sides online at
+      once. The inbox carries only ciphertext, recipients verify every
+      sender, and the server cannot read, forge, or alter a single word.
+      Messages delivered this way are marked <b>⇄ site</b>.</p>
     </div>
   </div>
 
-  <h2 id="security">Security, honestly</h2>
-  <p>Not "military-grade" adjectives — a graded model of what the portal
-  actually protects, what it reveals, and what it doesn't claim to solve.</p>
+  <h2 id="security">Security in plain terms</h2>
+  <p>No "military-grade" adjectives — a precise account of what's protected,
+  what the server can see, and what this doesn't claim to solve.</p>
   <div class="tier-grid">
   <div class="tier ok">
     <h3>Protected</h3>
@@ -374,21 +369,21 @@
       <li>Room keys — delivered sealed per member; rotation re-seals under the old key</li>
       <li>Universes — a ✦ Warp re-keys the room for everyone present; an old universe's key opens nothing new</li>
       <li>Private chats — memory-only, vanish when both sides leave</li>
-      <li>Your identity — a keypair that exists only on your device</li>
+      <li>Your identity — a key pair that exists only on your device</li>
     </ul>
-    <p class="verdict">Intercepting traffic gets an attacker ciphertext, always.</p>
+    <p class="verdict">An attacker intercepting traffic only ever sees ciphertext.</p>
   </div>
   <div class="tier meta">
-    <h3>Visible to your own hub (this site)</h3>
+    <h3>Visible to the server (this site)</h3>
     <ul>
       <li>That a peer id exists and its current addresses — signed by the peer, expiring in 5 minutes</li>
       <li>Which peer currently hosts which room — same signing, same expiry</li>
       <li>An anonymous "someone is online" token every two minutes — random per session, never tied to an identity</li>
-      <li>When direct delivery fails: sealed mailbox envelopes' sender/recipient ids, timing, and size — ciphertext only, signatures verified by recipients, not the hub</li>
+      <li>When direct delivery fails: sealed mailbox envelopes' sender/recipient ids, timing, and size — ciphertext only, signatures verified by recipients, not the server</li>
     </ul>
-    <p class="verdict">The hub is your own infrastructure and can never read a
-    word — but it (and anyone observing it) can learn this metadata. We say so
-    instead of hiding it.</p>
+    <p class="verdict">The server can never read a word — but it, and anyone
+    observing it, can learn this metadata. We state this plainly rather than
+    hide it.</p>
   </div>
   <div class="tier out">
     <h3>Out of scope — honest limits</h3>
@@ -401,17 +396,18 @@
   </div>
   </div>
 
-  <h2 id="faq">Questions friends actually ask</h2>
+  <h2 id="faq">Frequently asked questions</h2>
   <div class="faq-grid">
   <details name="faq">
     <summary>Do I need an account?</summary>
-    <p>No. Open the room, type any name, you're in. Your identity is a key
-    generated on your device the first time you join.</p>
+    <p>No. Open <a href="/join">/join</a>, type any name, and you're in.
+    Your identity is a key generated on your device the first time you
+    join.</p>
   </details>
   <details name="faq">
     <summary>Where do my messages live?</summary>
-    <p>In your browser session, sealed — close the tab and the transcript
-    is gone. Private chats vanish when both people leave. This site never
+    <p>In your browser session, encrypted. Close the tab and the transcript
+    is gone; private chats vanish when both people leave. This site never
     sees or stores a single word.</p>
   </details>
   <details name="faq">
@@ -428,17 +424,18 @@
   </details>
   <details name="faq">
     <summary>What's a word room?</summary>
-    <p>Exactly what it sounds like: type a word at the door and you're in a
-    room with everyone who types the same word — Earth is the public one.
-    The word never leaves your device; each machine derives the same room
-    from it, through a memory-hard function that makes guessing expensive.</p>
+    <p>Type a word at the door and you're in a room with everyone who types
+    the same word — Earth is the public room. The word never leaves your
+    device; every client derives the same room from it, through a
+    memory-hard function that makes guessing expensive.</p>
   </details>
   <details name="faq">
     <summary>What is ✦ Warp?</summary>
-    <p>The host's escape hatch. Warp re-keys the room: everyone present
-    moves together into a new universe, and the word immediately starts a
+    <p>Warp lets the host re-key the room on the spot: everyone present
+    moves together into a new universe, while the word immediately starts a
     fresh room for whoever types it next. A leaked word stops being a
-    problem — your group is gone, and strangers still get a working room.</p>
+    problem — your group has moved on, and newcomers still get a working
+    room.</p>
   </details>
   <details name="faq">
     <summary>Someone was offline when I sent a message. Is it lost?</summary>
