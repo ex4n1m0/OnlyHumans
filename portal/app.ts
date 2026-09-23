@@ -1526,20 +1526,10 @@ const invitedWord = (() => {
   return (new URLSearchParams(h).get("room") ?? "").trim().slice(0, 64);
 })();
 
-// Site link: green only while a presence round-trip actually completed
-// (same 6-minute staleness rule as the desktop app). beat() sets siteOk
-// on every outcome, so a hung or unreachable hub shows grey.
-const origBeat = portal.beat.bind(portal);
-let siteBeatAt = 0;
-portal.beat = async () => { await origBeat(); if (portal.siteOk) siteBeatAt = Date.now(); };
-const siteLive = () => siteBeatAt > 0 && Date.now() - siteBeatAt < 360_000;
-const siteDotHtml = () => {
-  const live = siteLive();
-  const title = live
-    ? `The site's public counter — ${portal.online} online now. No names, just a number.`
-    : "The site's counter can't see this tab right now (hub unreachable). Chat keeps working.";
-  return `<span class="sitelink ${live ? "on" : ""}" title="${esc(title)}"><span class="sitedot"></span><span class="sl-text">${live ? `${portal.online} online` : "site: offline"}</span></span>`;
-};
+// The site-wide online counter is a LANDING-page-only fact now — the room
+// shows nothing about it. portal.beat() still runs (it IS the counter: the
+// tab beats its presence token and beacons a leave on pagehide, keeping
+// the public number truthful); we just never display it in the room UI.
 
 function ensureToasts(): HTMLElement {
   let box = document.querySelector<HTMLElement>(".toasts");
@@ -1745,7 +1735,6 @@ function render() {
         <span class="rs-label">${activeDm ? esc(dmName(activeDm.peer)) : isEarth() ? "Main room" : "Code room"}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </span>
-      ${siteDotHtml()}
       <button id="p-editprofile" class="profilebtn" title="edit my profile — photo, name, bio, this room's picture" aria-label="edit my profile">✎<span class="pb-label">Edit my profile</span></button>
       <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
         ${avatarHtml(myId, portal.name || "you", photoOf(myId))}

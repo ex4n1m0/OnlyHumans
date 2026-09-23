@@ -14,7 +14,7 @@
 <meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="script" href="/join-assets/portal-NRDUF2QV.js">
+<link rel="preload" as="script" href="/join-assets/portal-RV3TOVSI.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -79,13 +79,6 @@
   }
   .roomchip .rs-glyph { color: var(--teal); }
   .roomchip .rs-label { font-weight: 600; }
-  .sitelink {
-    margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
-    color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; user-select: none;
-  }
-  .sitelink .sitedot { width: 8px; height: 8px; border-radius: 50%; background: #46565e; flex-shrink: 0; }
-  .sitelink.on { color: #7fd8a4; }
-  .sitelink.on .sitedot { background: #22c55e; box-shadow: 0 0 6px rgba(34, 197, 94, .8); }
   .idmenu {
     display: inline-flex; align-items: center; gap: 7px;
     background: transparent; border: 1px solid transparent; border-radius: var(--r-card);
@@ -96,9 +89,12 @@
   .idmenu .idname { color: var(--muted); }
   .idmenu .caret { color: var(--muted); font-size: 10px; }
   /* profile sheet's own button — deliberately bordered/brighter than the
-     ghost idmenu so it reads as an action, not part of the name chip */
+     ghost idmenu so it reads as an action, not part of the name chip.
+     Owns the bar's right-push: the room shows no site-wide facts, so the
+     first right-cluster element carries it. */
   .profilebtn {
     display: inline-flex; align-items: center; gap: 6px;
+    margin-left: auto;
     background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-card);
     color: var(--text); font-size: var(--fs-s); padding: 5px 10px; cursor: pointer;
     white-space: nowrap;
@@ -347,7 +343,6 @@
     header.cmdbar { padding: 8px 10px; gap: 8px; }
     header.cmdbar .logo { display: none; }
     .roomchip .rs-label { display: none; }
-    .sitelink .sl-text { display: none; }
     .idmenu .idname, .idmenu .caret { display: none; }
     /* the Edit-profile label stays on phones: the bar has room (logo,
        roomchip label and name all collapse) and a bare ✎ isn't visible
@@ -375,6 +370,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-NRDUF2QV.js" defer></script>
+<script src="/join-assets/portal-RV3TOVSI.js" defer></script>
 </body>
 </html>
