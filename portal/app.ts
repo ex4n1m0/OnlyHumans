@@ -1488,7 +1488,10 @@ function autosize(el: HTMLTextAreaElement) {
 }
 
 const isEarth = () => portal.word.trim().toLowerCase() === "earth";
-const roomName = () => (isEarth() ? "Earth room" : "Word room");
+/// The room IS its word — one name everywhere (titlebar, switcher, member
+/// header); the generic "Word room"/"Earth room" labels and the pill row
+/// are gone per the keep-it-simple pass.
+const roomName = () => portal.word;
 
 /** Newest-last slice of the connection log, shown while we hold no seat. */
 function connLogHtml(rows = 4): string {
@@ -1732,7 +1735,7 @@ function render() {
       <span class="roomchip" id="p-roomchip" role="button" tabindex="0" aria-haspopup="menu"
             title="switch between the room and your private chats">
         <span class="rs-glyph">${activeDm ? "⇄" : isEarth() ? "⌂" : "◆"}</span>
-        <span class="rs-label">${activeDm ? esc(dmName(activeDm.peer)) : isEarth() ? "Main room" : "Code room"}</span>
+        <span class="rs-label">${activeDm ? esc(dmName(activeDm.peer)) : esc(roomName())}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </span>
       <button id="p-editprofile" class="profilebtn" title="edit my profile — photo, name, bio, this room's picture" aria-label="edit my profile">✎<span class="pb-label">Edit my profile</span></button>
@@ -1794,12 +1797,7 @@ function render() {
           })() : `
           ${roomAvatarHtml()}
           <div class="tb-body">
-            <div class="tb-title">${roomName()}</div>
-            <div class="pills">
-              <span class="pill ${isEarth() ? "" : "amber"}" title="${isEarth() ? "everyone who uses the word earth meets here" : "only people who typed this room's word can be here"}">${isEarth() ? "public word" : "word room"}</span>
-              <span class="pill lock" title="messages are sealed on your device — the site never sees them">🔒 e2e</span>
-              ${portal.room && portal.room.epoch > 1 ? `<span class="pill" title="this room has warped ${portal.room.epoch - 1} time${portal.room.epoch === 2 ? "" : "s"} — you are in universe ${portal.room.epoch}">universe ${portal.room.epoch}</span>` : ""}
-            </div>
+            <div class="tb-title">${esc(roomName())}</div>
           </div>
           <div class="tb-actions">
             <button id="p-members" class="btn-ghost members-btn" title="people in this room">${memberCount} in room</button>
@@ -2020,7 +2018,7 @@ function render() {
     const items: MenuItem[] = [
       { label: "switch conversation", header: true },
       {
-        label: `${roomName()} · ${portal.word}`,
+        label: roomName(),
         icon: roomAvatarHtml(),
         act: () => { activeRoom = null; render(); },
       },
