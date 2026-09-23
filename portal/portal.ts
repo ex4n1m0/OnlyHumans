@@ -265,7 +265,7 @@ export class RoomCrypto {
 export interface MemberInfo { peer: string; name: string }
 
 export type Envelope =
-  | { Join: { room_id_hex: string; guest_id: string; guest_nonce_b64: string; guest_proof_b64: string; name: string } }
+  | { Join: { room_id_hex: string; guest_id: string; guest_nonce_b64: string; guest_proof_b64: string; name: string; beats?: boolean } }
   | { KeyDelivery: { room_id_hex: string; epoch: number; key_ct_b64: string; members: MemberInfo[] } }
   | { Members: { frame: Sealed } }
   | { Chat: { frame: Sealed } }
@@ -282,13 +282,25 @@ export type Envelope =
   /// 64 KB envelope cap with photos). Shipped desktop apps reject the
   /// unknown variant at serde and drop it, which is harmless.
   | { Profile: { frame: Sealed } }
+  /// Member -> host only (portal extension): a liveness beat — an empty
+  /// frame sealed under the room key, sent about once a minute while
+  /// seated. Hosts prune members that stop beating and mail them a
+  /// "seat-expired" notice so a waking tab re-seats itself
+  /// (docs/member-liveness-study.md). Desktop apps drop the variant at
+  /// serde, harmlessly — and because they never beat, hosts deliberately
+  /// never prune them (see pruneSilent).
+  | { Ping: { frame: Sealed } }
   | { Ack: Record<string, never> }
   | { Error: { message: string } };
 
 export function buildJoin(roomHex: string, peerId: string, name: string, gk: Uint8Array): Envelope {
   const nonce = crypto.getRandomValues(new Uint8Array(16));
   const proof = admissionProof(gk, peerId, nonce);
-  return { Join: { room_id_hex: roomHex, guest_id: peerId, guest_nonce_b64: b64(nonce), guest_proof_b64: b64(proof), name } };
+  // `beats` announces a heartbeat-capable joiner (this portal build).
+  // Older portals and desktop apps omit it — serde ignores unknown
+  // fields — and hosts deliberately never prune members that didn't
+  // announce (see pruneSilent).
+  return { Join: { room_id_hex: roomHex, guest_id: peerId, guest_nonce_b64: b64(nonce), guest_proof_b64: b64(proof), name, beats: true } };
 }
 
 // ------------------------------------------------------------ hub client
@@ -373,6 +385,27 @@ export class Hub {
     if (!r.ok) throw new Error(`mail drain failed: ${r.status}`);
     const j = await r.json();
     return (j.items ?? []) as MailItem[];
+  }
+
+  /// Graceful-exit Leave, built for unload time (pagehide): the mail item
+  /// is fully signed synchronously, then shipped by sendBeacon — a plain
+  /// fetch is killed mid-flight during unload, beacons are not. The inbox
+  /// endpoint accepts POST (same handler as PUT), the payload is a few
+  /// hundred bytes, and the signature covers the exact env_json, so the
+  /// hub stores it exactly like any other mail. Returns false when the
+  /// browser refused the beacon (caller may fall back or give up — the
+  /// host's prune pass sweeps up anything undelivered).
+  leaveOnce(peerId: string, pubB64: string, sign: (m: Uint8Array) => Uint8Array, to: string, roomHex: string): boolean {
+    const env_json = JSON.stringify({ Leave: { room_id_hex: roomHex } } satisfies Envelope);
+    const ts = Date.now();
+    const item = {
+      to, from: peerId, public_key_b64: pubB64, env_json, ts_ms: ts,
+      sig_b64: b64(sign(mailCanonical(peerId, to, ts, env_json))),
+    };
+    return navigator.sendBeacon(
+      `${this.base}/api/inbox`,
+      new Blob([JSON.stringify({ items: [item] })], { type: "application/json" }),
+    );
   }
 
   async presence(token: string): Promise<number> {

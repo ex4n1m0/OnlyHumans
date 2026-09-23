@@ -15,6 +15,7 @@ const KIND = {
   members: utf8("members\0"),
   dminvite: utf8("dminvite"),
   profile: utf8("profile\0"),
+  ping: utf8("ping\0\0\0\0"),
 };
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -307,6 +308,25 @@ class Portal {
   lastBeatAt = 0;
   lastRefreshAt = 0;
   loopStarted = false;
+  /// Host-side liveness bookkeeping (docs/member-liveness-study.md):
+  /// when we host, lastSeen maps each member to the time of their most
+  /// recent inbound frame (any kind — transport signature is the proof),
+  /// and `capable` marks members we have seen Ping from. Only capable
+  /// members are held to the prune standard: older clients never beat,
+  /// and pruning them would churn join/leave forever (they re-seat via
+  /// rediscover, silently, every cycle).
+  lastSeen = new Map<string, number>();
+  capable = new Set<string>();
+  lastPingAt = 0;
+  lastPruneAt = 0;
+  /// Liveness cadence tunables (fields, not consts, so e2e can tighten
+  /// them through __ohPortal instead of waiting out real minutes).
+  pingEvery = 60_000;
+  pruneAfter = 180_000;
+  pruneEvery = 15_000;
+  /// True after a deliberate log-off: the loops park (no re-seat
+  /// attempts, no inbox polling, no presence beats) until the next join.
+  left = false;
   /// Last hub contact verdict: null = never checked. Drives the site
   /// chip and the "site not answering" log line on transitions.
   siteOk: boolean | null = null;
@@ -380,6 +400,7 @@ class Portal {
   async join(name: string, word: string) {
     this.name = name;
     this.word = word;
+    this.left = false;
     this.identity();
     setStatus("fetching the room base…");
     await (this.gkPromise ?? this.fetchGk());
@@ -439,6 +460,8 @@ class Portal {
     this.hostId = this.peerId;
     this.room = new RoomCrypto(unhex(this.roomHex), 1, crypto.getRandomValues(new Uint8Array(32)));
     this.members = new Map([[this.peerId, this.name]]);
+    this.lastSeen.clear();
+    this.capable.clear();
     this.lastRefreshAt = Date.now();
     this.seatAttempts = 0;
     this.logConn("this tab created the room and is holding it open", "ok");
@@ -549,6 +572,7 @@ class Portal {
   /// One connection-maintenance pass. Separate from drain() so wake
   /// events can run it immediately.
   async cycle() {
+    if (this.left) return;
     if (!this.room) {
       await this.retryJoin();
     } else if (this.isHost) {
@@ -559,8 +583,13 @@ class Portal {
       // lapses and the next person typing it founds the word room fresh —
       // newcomers are handed our successor key directly in the meantime.
       if (this.room!.epoch === 1 && Date.now() - this.lastRefreshAt > 45_000) await this.hostRefresh();
-    } else if (Date.now() - this.lastHostContact > 45_000) {
-      await this.rediscover();
+      if (Date.now() - this.lastPruneAt > this.pruneEvery) {
+        this.lastPruneAt = Date.now();
+        void this.pruneSilent();
+      }
+    } else {
+      if (Date.now() - this.lastHostContact > 45_000) await this.rediscover();
+      if (Date.now() - this.lastPingAt > this.pingEvery) this.pingHost();
     }
     // Address registration + presence counter piggyback here. The hub
     // throttles both to one per 30s per peer/token — the 31s guard
@@ -668,12 +697,25 @@ class Portal {
         this.lastFoundTry = Date.now();
         const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
         if (won) {
+          // Sanitize the inherited list: the old host is provably gone
+          // (their record lapsed under them) — retire their name instead
+          // of pinning the ghost forever. Everyone else is presumed alive
+          // from now; their beats re-establish the prune standard.
+          const oldHost = this.hostId;
           this.isHost = true; // keep our RoomCrypto: same key, same epoch
           this.hostId = this.peerId;
           this.lastRefreshAt = Date.now();
           this.status = "";
+          const now = Date.now();
+          if (oldHost && oldHost !== this.peerId && this.members.has(oldHost)) {
+            const name = this.members.get(oldHost) ?? oldHost.slice(0, 10);
+            this.members.delete(oldHost);
+            this.lastSeen.delete(oldHost);
+            this.msgs.push({ ts: now, sender: "", name: "", body: `· ${name} drifted off`, out: false });
+          }
+          for (const p of this.members.keys()) if (!this.lastSeen.has(p)) this.lastSeen.set(p, now);
           this.logConn("the host left — this tab took over the room", "ok");
-          this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· the host left — this tab keeps the room open", out: false });
+          this.msgs.push({ ts: now, sender: "", name: "", body: "· the host left — this tab keeps the room open", out: false });
         }
       } catch { /* retry next cycle */ }
       return;
@@ -686,6 +728,7 @@ class Portal {
   }
 
   async drain() {
+    if (this.left) return;
     let items;
     try { items = await this.hub.mailDrain(this.peerId, this.sign); } catch { return; }
     for (const item of items) {
@@ -699,6 +742,11 @@ class Portal {
   }
 
   handle(from: string, env: Envelope) {
+    // Host-side liveness: any verified inbound frame is proof of life for
+    // its sender (the mail signature already authenticated them — the
+    // sealed frames below additionally prove key possession, but pruning
+    // only needs "this peer is still out there").
+    if (this.isHost && from !== this.peerId) this.lastSeen.set(from, Date.now());
     if ("KeyDelivery" in env) {
       const kd = env.KeyDelivery;
       if (kd.room_id_hex !== this.roomHex || this.isHost) return;
@@ -715,6 +763,7 @@ class Portal {
       this.members = new Map(kd.members.map((m) => [m.peer, m.name]));
       this.mySeq = Date.now();
       this.lastHostContact = Date.now();
+      this.lastPingAt = 0; // beat immediately: the host's prune clock starts at our Join
       this.seatAttempts = 0;
       this.status = "";
       this.logConn(`seated by host ${from.slice(0, 8)}… — universe ${kd.epoch}`, "ok");
@@ -743,9 +792,20 @@ class Portal {
     if ("Members" in env) {
       if (!this.room) return;
       if (env.Members.frame.epoch > this.room.epoch) { void this.resync(); return; }
+      // The member list is host-authoritative: any seated member can
+      // seal a Members frame (they hold the room key), so without this
+      // check one could rewrite everyone's list.
+      if (from !== this.hostId) return;
       const body = fromUtf8(this.room.open(env.Members.frame, KIND.members));
-      if (from === this.hostId) this.lastHostContact = Date.now();
+      this.lastHostContact = Date.now();
       const list = (JSON.parse(body) as { members: MemberInfo[] }).members;
+      // A list from our host that lacks us = we were pruned for silence
+      // (or missed the notice). Drop the seat and re-seek — the host
+      // re-admits us with the machinery that already exists.
+      if (!this.isHost && !list.some((m) => m.peer === this.peerId)) {
+        this.unseat("the host's list no longer has us — re-seating");
+        return;
+      }
       this.members = new Map(list.map((m) => [m.peer, m.name]));
       this.profilePush(); // someone new may have arrived
       return;
@@ -771,15 +831,41 @@ class Portal {
       this.handleProfileFrame(from, env.Profile.frame);
       return;
     }
-    if ("Leave" in env) {
+    if ("Ping" in env) {
+      // Liveness beat from a seated member (or a successor-room peer —
+      // those seal under the successor key, which no longer opens here;
+      // the transport signature is the proof that counts, and lastSeen
+      // was already updated at the top of handle()).
       if (!this.isHost) return;
+      this.capable.add(from);
+      try { this.room!.open(env.Ping.frame, KIND.ping); } catch { /* successor-keyed or stale epoch */ }
+      return;
+    }
+    if ("Leave" in env) {
+      if (!this.room) return;
+      // A member's Leave removes the sender from every list (the mail
+      // signature pins who left); the host re-broadcasts the shrunken
+      // list. Our HOST leaving is a different event entirely: drop the
+      // seat and re-seek, so we converge on a takeover in seconds.
+      if (!this.isHost && from === this.hostId) {
+        this.unseat("the host left — finding the room again");
+        return;
+      }
       const name = this.members.get(from) ?? from.slice(0, 10);
       this.members.delete(from);
+      this.lastSeen.delete(from);
+      this.capable.delete(from);
       this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${name} left`, out: false });
-      void this.broadcastMembers();
+      if (this.isHost) void this.broadcastMembers();
       return;
     }
     if ("Error" in env) {
+      // The host pruned us for silence: drop the seat and re-seek — the
+      // retry loop re-admits us through the normal Join path.
+      if (env.Error.message === "seat-expired" && !this.isHost && from === this.hostId) {
+        this.unseat("the host dropped our seat for silence — rejoining");
+        return;
+      }
       // A peer could not open a DM frame (they lost the key to a refresh):
       // re-invite them with our existing key, like the desktop app does.
       const lost = /^unknown-room:([0-9a-f]{32})$/.exec(env.Error.message);
@@ -825,6 +911,11 @@ class Portal {
     if (diff !== 0) return; // proof failed
     const isNew = !this.members.has(from);
     this.members.set(from, j.name || from.slice(0, 10));
+    // A joiner that announces it beats is held to the prune standard from
+    // the Join itself — covers a crash between seat and first Ping (a
+    // stale Join re-admitting after a Leave would otherwise ghost
+    // forever). Older clients omit the flag and are never pruned.
+    if (j.beats === true) this.capable.add(from);
     if (isNew) {
       this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${j.name || from.slice(0, 10)} joined`, out: false });
       this.logConn(`seated ${j.name || from.slice(0, 8)}… — key sent`, "ok");
@@ -863,6 +954,115 @@ class Portal {
     const batch = [...this.members.keys()].filter((p) => p !== this.peerId)
       .map((to) => ({ to, env }));
     await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+  }
+
+  // ------------------------------------------------------ member liveness
+  // docs/member-liveness-study.md: the member list is "who proved life
+  // recently". Members beat to the host; the host prunes silence and
+  // notifies the pruned peer, which re-seats itself automatically — so
+  // pruning a suspended phone costs one re-join, not a broken session.
+
+  /// Liveness beat: an empty frame sealed under the room key, mailed to
+  /// the host only. Sealing matters — it proves we still hold the key,
+  /// not just the peer id. The 60s cadence survives Chrome's 1/min
+  /// background-tab throttling; a suspended phone stops beating and is
+  /// pruned, which is correct — it re-seats the moment it wakes.
+  pingHost() {
+    if (!this.room || this.isHost || !this.hostId) return;
+    this.lastPingAt = Date.now();
+    this.mySeq++;
+    const frame = this.room.seal(this.peerId, this.mySeq, KIND.ping, utf8("{}"));
+    void this.hub.mailPush(this.peerId, this.pubB64, this.sign, this.hostId, [{ Ping: { frame } }]).catch(() => {});
+  }
+
+  /// Host: drop members that went silent. Only members we've seen Ping
+  /// from are held to the standard — older clients never beat, and
+  /// pruning them would churn join/leave forever (they re-seat via
+  /// rediscover without ever learning why). The pruned peer is mailed a
+  /// seat-expired notice so a waking tab re-seats immediately; everyone
+  /// else gets the shrunken list. The successor room (word-newcomers
+  /// while we hold a warped room) gets the same silence rule — a pruned
+  /// successor heals through its own rediscover re-knock.
+  async pruneSilent() {
+    if (!this.room || !this.isHost) return;
+    const now = Date.now();
+    const silent = (p: string): boolean =>
+      this.capable.has(p) && (this.lastSeen.get(p) ?? 0) > 0 && now - this.lastSeen.get(p)! > this.pruneAfter;
+    const batch: Array<{ to: string; env: Envelope }> = [];
+    for (const p of [...this.members.keys()]) {
+      if (p === this.peerId || !silent(p)) continue;
+      const name = this.members.get(p) ?? p.slice(0, 10);
+      this.members.delete(p);
+      this.lastSeen.delete(p);
+      this.capable.delete(p);
+      this.msgs.push({ ts: now, sender: "", name: "", body: `· ${name} drifted off`, out: false });
+      batch.push({ to: p, env: { Error: { message: "seat-expired" } } });
+    }
+    if (this.successor) {
+      let cut = false;
+      for (const p of [...this.successor.peers.keys()]) {
+        if (!silent(p)) continue;
+        this.successor.peers.delete(p);
+        this.lastSeen.delete(p);
+        this.capable.delete(p);
+        cut = true;
+      }
+      if (cut && this.successor.peers.size) {
+        const list = [...this.successor.peers.entries()].map(([p, n]) => ({ peer: p, name: n }));
+        this.successor.seq++;
+        const mf = this.successor.crypto.seal(this.peerId, this.successor.seq, KIND.members,
+          utf8(JSON.stringify({ members: list })));
+        for (const p of this.successor.peers.keys()) batch.push({ to: p, env: { Members: { frame: mf } } });
+      }
+    }
+    if (!batch.length) return;
+    const mf = this.sealMembersFrame();
+    if (mf) for (const p of this.members.keys()) if (p !== this.peerId) batch.push({ to: p, env: { Members: { frame: mf } } });
+    render();
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+  }
+
+  /// Drop our seat locally and let the connection loop seek a fresh one.
+  /// Used when the host provably dropped us (seat-expired notice, member
+  /// list without us, or the host's own Leave): identity, keys, history
+  /// and DMs all survive — retryJoin() re-seats through the normal Join.
+  unseat(logText: string) {
+    this.room = null;
+    this.lastJoinMailAt = 0;
+    setStatus("rejoining the room…");
+    this.logConn(logText, "warn");
+  }
+
+  /// Deliberate exit (Log off, or joining a different word): tell the
+  /// room we're gone — a member tells its host, a HOST tells every member
+  /// (each survivor then re-seats onto a takeover in seconds instead of
+  /// waiting out the 5-minute record lapse) — and unseat locally. `gone`
+  /// additionally parks the loops and drops us from the site's presence
+  /// counter; used when the tab stays open on the gate screen.
+  leaveRoom(gone: boolean) {
+    if (this.room) {
+      if (this.isHost) {
+        const batch = [...this.members.keys()].filter((p) => p !== this.peerId)
+          .map((to) => ({ to, env: { Leave: { room_id_hex: this.roomHex } } as Envelope }));
+        if (batch.length) void this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+      } else if (this.hostId) {
+        void this.hub.mailPush(this.peerId, this.pubB64, this.sign, this.hostId,
+          [{ Leave: { room_id_hex: this.roomHex } }]).catch(() => {});
+      }
+    }
+    this.room = null;
+    this.left = gone;
+    if (gone) {
+      void fetch("/api/presence", {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: this.presenceToken, leave: true }),
+      }).catch(() => {});
+      this.msgs = [];
+      this.members = new Map();
+      this.lastSeen.clear();
+      this.capable.clear();
+      this.status = "";
+    }
   }
 
   async send(text: string, img?: ImgPayload) {
@@ -1564,6 +1764,7 @@ function render() {
         label: "Log off",
         hint: "back to the join screen — your key stays in this browser",
         act: () => {
+          portal.leaveRoom(true);
           portal.dms.clear();
           activeRoom = null;
           editingProfile = false;
@@ -1809,10 +2010,12 @@ async function doJoin() {
   // different DM space, so private chats never survive a word change.
   // Peers' profiles and the room image are room-scoped the same way; our
   // own photo/bio carry over (they are the user's, not the room's).
+  portal.leaveRoom(false); // a deliberate re-join leaves whatever room we held
   portal.dms.clear();
   portal.profiles.clear();
   portal.profSeen.clear();
   portal.profSentTo.clear();
+  portal.msgs = [];
   portal.roomImg = { img: "", ts: 0, by: "" };
   activeRoom = null;
   editingProfile = false;
@@ -1840,8 +2043,35 @@ localStorage.removeItem("oh-portal-name");
 document.addEventListener("dragover", (e) => e.preventDefault());
 document.addEventListener("drop", (e) => e.preventDefault());
 
+// Leaving gracefully (docs/member-liveness-study.md layer A): pagehide is
+// the one unload event every browser — including iOS Safari — emits
+// reliably. A member tells its host; a HOST tells each member, so
+// survivors re-seat onto a takeover in seconds instead of waiting out the
+// 5-minute record lapse. Beacons survive unload; nothing else about the
+// tab does. Deliberately NOT wired to visibilitychange — backgrounding a
+// phone tab is "away", not "left".
+window.addEventListener("pagehide", () => {
+  if (portal.room) {
+    if (portal.isHost) {
+      for (const p of portal.members.keys()) {
+        if (p !== portal.peerId) portal.hub.leaveOnce(portal.peerId, portal.pubB64, portal.sign, p, portal.roomHex);
+      }
+    } else if (portal.hostId) {
+      portal.hub.leaveOnce(portal.peerId, portal.pubB64, portal.sign, portal.hostId, portal.roomHex);
+    }
+  }
+  // Drop out of the site's public counter too, so "N online" is truthful
+  // the moment a tab closes instead of riding out the 5-minute TTL.
+  navigator.sendBeacon("/api/presence",
+    new Blob([JSON.stringify({ token: portal.presenceToken, leave: true })], { type: "application/json" }));
+  portal.room = null; // the loops are dying with the page; nothing may re-seat
+});
+
 // Console hook for e2e/debugging (same spirit as __ohPortal).
 (window as any).__ohImg = { pickImage, fileToImagePayload, parseChatBody, mailFits, pending: () => pendingImg };
+// Liveness e2e hook: frame kinds (to forge/craft sealed frames) and the
+// liveness tunables already sit on __ohPortal as fields.
+(window as any).__ohLive = { KIND };
 
 render();
 portal.prefetch();
