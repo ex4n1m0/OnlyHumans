@@ -1678,7 +1678,7 @@ function render() {
       <div class="gate">
         <div class="gate-inner">
           <img class="gate-logo" src="/icon-256.png" alt="">
-          <h2>Every word is a room</h2>
+          <h2>Every Word is a Key</h2>
           <div class="gaterow">
             <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(rem.on ? rem.name : "")}">
           </div>
