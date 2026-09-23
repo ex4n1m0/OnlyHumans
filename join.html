@@ -14,7 +14,7 @@
 <meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="script" href="/join-assets/portal-QS5GXTQ3.js">
+<link rel="preload" as="script" href="/join-assets/portal-YWGXKO4R.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -95,6 +95,15 @@
   .idmenu .avatar { width: 20px; height: 20px; font-size: 10px; }
   .idmenu .idname { color: var(--muted); }
   .idmenu .caret { color: var(--muted); font-size: 10px; }
+  /* profile sheet's own button — deliberately bordered/brighter than the
+     ghost idmenu so it reads as an action, not part of the name chip */
+  .profilebtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-card);
+    color: var(--text); font-size: var(--fs-s); padding: 5px 10px; cursor: pointer;
+    white-space: nowrap;
+  }
+  .profilebtn:hover { color: var(--teal); border-color: var(--teal-dim); background: var(--teal-dim); }
 
   .menu {
     position: fixed; z-index: 90; min-width: 240px; max-width: 320px;
@@ -148,14 +157,15 @@
   .member-list .mname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
   .member-list .li-sub { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
 
-  /* direct messages — ⇄ chip on member rows, switchable dm rows */
+  /* direct messages — labelled teal pill on member rows (visible at a
+     glance, not a mystery glyph), switchable dm rows */
   .member-list li .dm-btn {
-    flex-shrink: 0; width: 26px; height: 26px; padding: 0;
+    flex-shrink: 0; height: 26px; padding: 0 10px;
     display: inline-flex; align-items: center; justify-content: center;
-    border-radius: 7px; border: 1px solid var(--line); background: transparent;
-    color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer;
+    border-radius: 999px; border: 1px solid var(--teal-dim); background: transparent;
+    color: var(--teal); font-size: 12px; font-weight: 500; line-height: 1; cursor: pointer;
   }
-  .member-list li .dm-btn:hover { color: var(--teal); border-color: var(--teal-dim); background: var(--teal-dim); }
+  .member-list li .dm-btn:hover { color: #eafcff; border-color: var(--teal); background: var(--teal-dim); }
   .member-list.dm-list { flex: 0 1 auto; }
   li.dmrow { cursor: pointer; }
   li.dmrow.active { background: #17262f; box-shadow: inset 2px 0 0 var(--teal); }
@@ -339,6 +349,9 @@
     .roomchip .rs-label { display: none; }
     .sitelink .sl-text { display: none; }
     .idmenu .idname, .idmenu .caret { display: none; }
+    /* the Edit-profile label stays on phones: the bar has room (logo,
+       roomchip label and name all collapse) and a bare ✎ isn't visible
+       enough — the whole point of the button */
     .sidebar { display: none; }
     .members-btn { display: inline-flex; }
     .connlog { max-width: 100%; }
@@ -362,6 +375,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-QS5GXTQ3.js" defer></script>
+<script src="/join-assets/portal-YWGXKO4R.js" defer></script>
 </body>
 </html>

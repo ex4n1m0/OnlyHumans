@@ -1746,6 +1746,7 @@ function render() {
         <span class="caret" aria-hidden="true">▾</span>
       </span>
       ${siteDotHtml()}
+      <button id="p-editprofile" class="profilebtn" title="edit your profile — photo, name, bio, this room's picture" aria-label="edit your profile">✎<span class="pb-label">Edit profile</span></button>
       <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
         ${avatarHtml(myId, portal.name || "you", photoOf(myId))}
         <span class="idname">${esc(portal.name)}</span>
@@ -1770,7 +1771,7 @@ function render() {
               <span class="mname">${esc(dmName(peer))}</span>
               <span class="li-sub">${esc(bioOf(peer) || "via site")}</span>
             </div>
-            <button class="dm-btn" data-peer="${peer}" title="private chat with ${esc(dmName(peer))}" aria-label="private chat with ${esc(dmName(peer))}">⇄</button>
+            <button class="dm-btn" data-peer="${peer}" title="private chat with ${esc(dmName(peer))}" aria-label="private chat with ${esc(dmName(peer))}">⇄ message</button>
           </li>`).join("")}
         </ul>
         ${portal.dms.size ? `
@@ -1910,19 +1911,6 @@ function render() {
     openMenu(el, [
       { label: `${portal.name} · portal build ${BUILD}`, header: true },
       {
-        label: "Edit profile",
-        hint: portal.bio ? portal.bio.slice(0, 48) : "photo · bio · this room's picture",
-        icon: avatarHtml(portal.peerId || "", portal.name || "you", photoOf(portal.peerId)),
-        act: () => {
-          editingProfile = true;
-          avatarDraft = null;
-          roomDraft = null;
-          avatarRemoved = false;
-          roomRemoved = false;
-          render();
-        },
-      },
-      {
         label: "Log off",
         hint: "back to the join screen — your key stays in this browser",
         act: () => {
@@ -1938,6 +1926,16 @@ function render() {
       },
       { label: `${BROWSER} · Enter sends, Shift+Enter newline`, header: true },
     ]);
+  });
+  // The profile sheet got its own always-visible button (user ask: more
+  // discoverable than burying it in the identity menu) — left of the menu.
+  $("p-editprofile")?.addEventListener("click", () => {
+    editingProfile = true;
+    avatarDraft = null;
+    roomDraft = null;
+    avatarRemoved = false;
+    roomRemoved = false;
+    render();
   });
   $("p-invite")?.addEventListener("click", () => void copyInvite());
   $("p-invite-empty")?.addEventListener("click", () => void copyInvite());
