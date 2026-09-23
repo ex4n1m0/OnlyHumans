@@ -81,13 +81,15 @@
   .brand img { width: 26px; height: 26px; border-radius: 7px; }
   .wordmark { font-weight: 700; color: var(--ink); font-size: 1rem; }
   .wordmark b { color: var(--accent); }
+  /* the pill CLUSTER owns the bar's right-push — either pill can be
+     hidden (pre-fetch, empty count) without the row losing alignment */
+  .live-pills { margin-left: auto; display: inline-flex; align-items: center;
+                gap: .45rem; white-space: nowrap; }
   .live-pill {
     display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap;
     border: 1px solid var(--line); border-radius: 999px;
     padding: .22rem .7rem; font-size: .8rem; color: var(--ink-soft);
   }
-  /* rooms pill sits LEFT of the humans pill and owns the bar's right-push */
-  .live-pill.rooms-pill { margin-left: auto; }
   .live-pill[hidden] { display: none; }
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
               box-shadow: 0 0 8px rgba(74,222,128,.7); flex: 0 0 auto; }
@@ -96,7 +98,7 @@
     @keyframes livedot { 0%,100% { opacity:.45 } 50% { opacity:1 } }
   }
   .nav-inner .btn { min-height: 40px; padding: .5rem 1.15rem; font-size: .92rem; }
-  @media (max-width: 560px) { .live-pill { display: none; } }
+  @media (max-width: 560px) { .live-pills { display: none; } }
 
   /* hero — logo on top, centered */
   .hero {
@@ -186,13 +188,15 @@
       <img src="/icon-256.png" alt="" width="26" height="26">
       <span class="wordmark">only<b>humans</b></span>
     </a>
-    <span class="live-pill rooms-pill" id="rooms-pill" hidden title="Rooms with a live host right now — just a count; the server can't see inside any room.">
-      <span aria-hidden="true">◆</span>
-      <span><b id="rooms-count">0</b> <span id="rooms-word">rooms</span> live</span>
-    </span>
-    <span class="live-pill" id="live-pill" hidden title="Everyone online heartbeats an anonymous session token — no names, no peer ids.">
-      <span class="live-dot" aria-hidden="true"></span>
-      <span><b id="live-count">0</b> <span id="live-word">humans</span> online</span>
+    <span class="live-pills">
+      <span class="live-pill" id="rooms-pill" hidden title="Rooms with a live host right now — just a count; the server can't see inside any room.">
+        <span aria-hidden="true">◆</span>
+        <span><b id="rooms-count">0</b> <span id="rooms-word">rooms</span> live</span>
+      </span>
+      <span class="live-pill" id="live-pill" hidden title="Everyone online heartbeats an anonymous session token — no names, no peer ids.">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span><b id="live-count">0</b> <span id="live-word">humans</span> online</span>
+      </span>
     </span>
     <a class="btn btn-primary" href="/join">Join</a>
   </div>
@@ -365,8 +369,9 @@
           document.getElementById("live-count").textContent = String(j.online);
           document.getElementById("live-word").textContent = j.online === 1 ? "human" : "humans";
           pill.hidden = false;
-          // 0 or missing (scan failed server-side) = nothing to say
-          if (typeof j.rooms === "number" && j.rooms > 0) {
+          // 0 shows too ("0 rooms live" — same honesty as "0 humans online");
+          // only a missing field (server scan failed) stays hidden
+          if (typeof j.rooms === "number") {
             document.getElementById("rooms-count").textContent = String(j.rooms);
             document.getElementById("rooms-word").textContent = j.rooms === 1 ? "room" : "rooms";
             rpill.hidden = false;
