@@ -34,7 +34,7 @@
         <span class="caret" aria-hidden="true">\u25BE</span>
       </span>
       ${qh()}
-      <button id="p-editprofile" class="profilebtn" title="edit your profile \u2014 photo, name, bio, this room's picture" aria-label="edit your profile">\u270E<span class="pb-label">Edit profile</span></button>
+      <button id="p-editprofile" class="profilebtn" title="edit my profile \u2014 photo, name, bio, this room's picture" aria-label="edit my profile">\u270E<span class="pb-label">Edit my profile</span></button>
       <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
         ${Ct(c,E.name||"you",Ot(c))}
         <span class="idname">${Y(E.name)}</span>
@@ -134,7 +134,7 @@
       </div>`}
     </main>`,Jt){let l=Ut?.src??(me?"":E.photo),p=Ht?.src??(we?"":E.roomImg.img);t.insertAdjacentHTML("beforeend",`
       <div class="sheetwrap" id="pf-wrap">
-        <div class="sheet" role="dialog" aria-label="edit your profile">
+        <div class="sheet" role="dialog" aria-label="edit my profile">
           <div class="sheet-title">Your profile</div>
           <div class="pf-photo">
             ${Ct(E.peerId||"",E.name||"you",l)}

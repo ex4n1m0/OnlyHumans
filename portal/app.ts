@@ -1746,7 +1746,7 @@ function render() {
         <span class="caret" aria-hidden="true">▾</span>
       </span>
       ${siteDotHtml()}
-      <button id="p-editprofile" class="profilebtn" title="edit your profile — photo, name, bio, this room's picture" aria-label="edit your profile">✎<span class="pb-label">Edit profile</span></button>
+      <button id="p-editprofile" class="profilebtn" title="edit my profile — photo, name, bio, this room's picture" aria-label="edit my profile">✎<span class="pb-label">Edit my profile</span></button>
       <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
         ${avatarHtml(myId, portal.name || "you", photoOf(myId))}
         <span class="idname">${esc(portal.name)}</span>
@@ -1867,7 +1867,7 @@ function render() {
     const roomPhoto = roomDraft?.src ?? (roomRemoved ? "" : portal.roomImg.img);
     root.insertAdjacentHTML("beforeend", `
       <div class="sheetwrap" id="pf-wrap">
-        <div class="sheet" role="dialog" aria-label="edit your profile">
+        <div class="sheet" role="dialog" aria-label="edit my profile">
           <div class="sheet-title">Your profile</div>
           <div class="pf-photo">
             ${avatarHtml(portal.peerId || "", portal.name || "you", ownPhoto)}
