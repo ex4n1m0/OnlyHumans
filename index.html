@@ -156,6 +156,13 @@
   details summary:hover { background: rgba(236,233,226,.045); border-radius: 12px; }
   details p { padding: .05rem 1.25rem 1rem; color: var(--ink-soft); font-size: .91rem; max-width: 60rem; }
 
+  .crypto { display: grid; gap: .9rem; max-width: 60rem; }
+  .crypto p { color: var(--ink-soft); font-size: .92rem; }
+  .crypto strong { color: #fff; }
+  .crypto code { font-family: ui-monospace, Consolas, monospace; font-size: .84em;
+                 color: var(--accent); background: rgba(86,197,218,.07);
+                 padding: .1em .38em; border-radius: 5px; }
+
   footer.site { border-top: 1px solid rgba(236,233,226,.05); margin-top: 3.6rem;
                 padding: 2.2rem 1.4rem 2.6rem; text-align: center; }
   footer .slogan { color: var(--ink-soft); margin-bottom: .6rem; }
@@ -280,6 +287,43 @@
         <p>Yes — open <a href="/join">/join</a> in any browser, nothing to
         install.</p>
       </details>
+    </div>
+  </section>
+
+  <section id="crypto" aria-labelledby="crypto-h">
+    <h2 class="section" id="crypto-h">The encryption, technically</h2>
+    <div class="crypto">
+      <p><strong>The primitives.</strong> Everything is one AEAD cipher —
+      XChaCha20-Poly1305 — with keys derived through HKDF-SHA256, identities
+      as Ed25519 keypairs, and the word stretched through Argon2id at
+      64&nbsp;MiB / t=3 / 1 thread. Every sealed frame carries AAD binding
+      its context (kind, room, epoch, sender, seq), so a ciphertext can't be
+      replayed into another room, generation, or slot — the tag fails.</p>
+      <p><strong>The key stack, bottom to top.</strong> (1) The word is
+      stretched with Argon2id into an "effective GK" (the GK is the public
+      per-release universe key — it opens no room by itself); the room id is
+      just <code>SHA256("OH1-room-v1|" + egk)</code> truncated to 16 bytes —
+      the word itself never crosses the network, and the hash is one-way.
+      (2) The room key is 32 random bytes minted by the founder; it's the
+      actual chat key. (3) Every single message gets its own key:
+      <code>HKDF(roomKey, room+epoch, kind+sender+seq)</code> plus a random
+      nonce — so no message reuses a keystream, and compromising one
+      ciphertext teaches nothing about the next. (4) Your Ed25519 identity
+      signs every envelope; peer id = hash of the public key, so nobody can
+      claim an id they can't sign for.</p>
+      <p><strong>How deep the nesting goes.</strong> Keys are sealed under
+      keys, always forward: the room key is delivered to new members sealed
+      under the GK channel, whose keystream itself is bound to (room, epoch,
+      recipient) — a capture of that envelope only works for that one
+      recipient in that one generation. Rotation mints a fresh 256-bit key
+      sealed under the current one, so only current members transition and
+      evicted members hold a dead key forever; epoch counters forbid key
+      regressions. Warp goes one level deeper still — it re-keys the entire
+      universe, so today's key unlocks nothing from any previous universe.
+      So the deepest an attacker can reach by unwinding is: compromise one
+      member device → read that room until the next rotation — that's the
+      floor, and it's also the eviction lever (word = admission, rotation =
+      eviction).</p>
     </div>
   </section>
 </main>
