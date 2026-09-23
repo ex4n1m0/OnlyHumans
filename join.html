@@ -14,7 +14,7 @@
 <meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="script" href="/join-assets/portal-EBLTD264.js">
+<link rel="preload" as="script" href="/join-assets/portal-QS5GXTQ3.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -253,17 +253,31 @@
   .composer button { flex-shrink: 0; }
 
   /* shared images — re-encoded to ≤30 KB on the sender's device
-     (docs/image-sharing-study.md inline tier) */
+     (docs/image-sharing-study.md inline tier). Files ride the same
+     30 KB tier as raw bytes, rendered as download-only chips. */
   .msg.hasimg { max-width: min(85%, 340px); padding: 4px; }
   .msg.hasimg .meta { padding: 2px 6px 3px; }
   .msgimg { display: block; max-width: 100%; max-height: 240px; border-radius: 8px;
             cursor: zoom-in; margin-top: 4px; }
   .msg.hasimg:not(.out) .msgimg, .msg.out .msgimg { background: #1d313c; }
+  .msgfile { display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 4px;
+             padding: 8px 10px; background: #1d313c; border: 1px solid var(--line);
+             border-radius: 8px; text-align: left; }
+  .msgfile:hover { border-color: var(--teal); background: #1d313c; }
+  .mf-icon { flex-shrink: 0; display: inline-flex; color: var(--teal); }
+  .mf-icon svg { width: 18px; height: 18px; }
+  .mf-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .mf-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mf-meta { font-size: 11px; color: var(--muted); }
   .imgqueue { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
               background: var(--panel); border-top: 1px solid #1f3038; }
   .imgqueue .spin { flex-shrink: 0; }
   .iq-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 7px;
               border: 1px solid var(--line); flex-shrink: 0; }
+  .iq-ficon { width: 42px; height: 42px; display: inline-flex; align-items: center;
+              justify-content: center; border: 1px solid var(--line); border-radius: 7px;
+              color: var(--teal); flex-shrink: 0; }
+  .iq-ficon svg { width: 18px; height: 18px; }
   .iq-meta { flex: 1; font-size: 11px; color: var(--muted); min-width: 0;
              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .iq-x { width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center;
@@ -348,6 +362,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-EBLTD264.js" defer></script>
+<script src="/join-assets/portal-QS5GXTQ3.js" defer></script>
 </body>
 </html>

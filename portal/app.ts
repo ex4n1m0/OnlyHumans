@@ -49,7 +49,7 @@ const BROWSER = (() => {
   return `${name} · ${os}`;
 })();
 
-interface Msg { ts: number; sender: string; name: string; body: string; out: boolean; img?: ImgMsg }
+interface Msg { ts: number; sender: string; name: string; body: string; out: boolean; img?: ImgMsg; file?: FileMsg }
 
 /** One ephemeral two-person room (mirrors core rooms.rs DmRoom): a random
  *  key only the two peers hold, memory-only, never rotated, delivered
@@ -82,11 +82,62 @@ interface ConnEvent { ts: number; text: string; kind: "try" | "ok" | "warn" }
 // exact (non-bucket) padding; text-only messages keep the raw-text body of
 // every shipped client.
 
+// Files ride the SAME inline tier and the same 30 KB budget — but bytes
+// travel as-is (no canvas re-encode exists for arbitrary files), so the
+// raw size is checked up front instead: 30 KB → ~41 KB of base64 → the
+// identical envelope arithmetic an image frame already fits. Wire format:
+// {"ohfile":{"d","n","m","s"},"t":"caption"}. Files are never rendered —
+// only downloadable via a lazily built blob URL — so content can't execute
+// on receipt. Note the privacy difference: an image is re-encoded (EXIF
+// gone), a file arrives byte-for-byte, metadata included.
+
 interface ImgPayload { d: string; w: number; h: number; m: string }
 interface ImgMsg { src: string; w: number; h: number }
 interface PendingImg extends ImgPayload { src: string; bytes: number }
 
+interface FilePayload { d: string; n: string; m: string; s: number }
+/** A file frame rendered in a chat — `id` maps the DOM chip back to the
+ *  bytes; the blob URL is minted on first click, never at render. */
+interface FileMsg extends FilePayload { id: string; url?: string }
+interface PendingFile extends FilePayload { }
+
+const fileById = new Map<string, FileMsg>();
+let fileSeq = 0;
+function mintFileMsg(p: FilePayload): FileMsg {
+  const m: FileMsg = { ...p, id: `f${Date.now().toString(36)}${++fileSeq}` };
+  fileById.set(m.id, m);
+  return m;
+}
+
+/** Room switch / log-off: the messages that referenced these chips are
+ *  gone, so drop the bytes and revoke any minted blob URLs. */
+function clearFileMsgs() {
+  for (const f of fileById.values()) if (f.url) URL.revokeObjectURL(f.url);
+  fileById.clear();
+}
+
+/** A peer-supplied filename never touches the filesystem as a path — it is
+ *  display text and a `download` hint — but keep it sane anyway: last path
+ *  segment, no control chars, bounded. */
+function safeFileName(s: unknown): string {
+  if (typeof s !== "string") return "";
+  return s.replace(/\\/g, "/").split("/").pop()!
+    .replace(/[\u0000-\u001f\u007f]/g, "").replace(/^\.+/, "").trim().slice(0, 80);
+}
+
+/** Mime types are only a Blob `type` hint on download; still refuse
+ *  anything but a well-formed type/subtype pair. */
+function safeMime(s: unknown): string {
+  return typeof s === "string" && /^[a-z0-9][a-z0-9!#$&^_.+-]{0,99}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,99}$/i.test(s)
+    ? s.toLowerCase() : "application/octet-stream";
+}
+
+/// Types that execute when the recipient opens the saved file — the chip
+/// labels them so a "30 KB download" never hides a web page.
+const ACTIVE_TYPES = new Set(["text/html", "image/svg+xml", "application/xhtml+xml"]);
+
 const IMG_BUDGET = 30 * 1024;
+const FILE_BUDGET = IMG_BUDGET; // same inline-tier limit, enforced on the raw bytes
 const IMG_EDGES = [1280, 1024, 880, 720, 560, 440, 320];
 /// Avatars (profile + room images) render at ≤52 px but may be viewed
 /// larger: a 320 px re-encode under 8 KB is crisp everywhere and keeps a
@@ -95,7 +146,9 @@ const AVATAR_BUDGET = 8 * 1024;
 const AVATAR_EDGES = [320, 256, 192, 160, 128];
 
 let pendingImg: PendingImg | null = null;
+let pendingFile: PendingFile | null = null;
 let convertingWhat = "";
+let convertingKind: "img" | "file" = "img";
 
 function payloadToImg(p: ImgPayload): ImgMsg {
   return { src: `data:${p.m};base64,${p.d}`, w: p.w, h: p.h };
@@ -168,7 +221,8 @@ type PickTarget = "chat" | "avatar" | "room";
 async function pickImage(file: Blob | null | undefined, what: PickTarget = "chat") {
   if (!file || convertingWhat) return;
   convertingWhat = what;
-  if (what === "chat") pendingImg = null;
+  convertingKind = "img";
+  if (what === "chat") { pendingImg = null; pendingFile = null; }
   render();
   try {
     const p = what === "chat"
@@ -178,7 +232,43 @@ async function pickImage(file: Blob | null | undefined, what: PickTarget = "chat
     else if (what === "avatar") avatarDraft = p;
     else roomDraft = p;
   } catch {
-    toast("couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to size on your device");
+    // Undecodable-but-small (HEIC on Chrome, say): the bytes can still
+    // travel as a file. No re-encode happened, so unlike the image ladder
+    // the metadata (EXIF, location) stays in — the warning is explicit.
+    if (what === "chat" && file.size <= FILE_BUDGET) {
+      await pickFileAfterConvert(file);
+      toast("couldn't re-encode this picture here — it's queued as a file, sent as-is with its metadata");
+    } else {
+      toast("couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to size on your device");
+    }
+  } finally {
+    convertingWhat = "";
+    render();
+  }
+}
+
+/** Queue a small file that just failed the image ladder — shares the
+ *  reading path with pickFile but runs inside pickImage's busy state. */
+async function pickFileAfterConvert(file: Blob) {
+  try {
+    pendingFile = { d: await blobToStdB64(file), n: safeFileName((file as File).name) || "file", m: safeMime(file.type), s: file.size };
+  } catch { toast("couldn't read this file"); }
+}
+
+async function pickFile(file: Blob | null | undefined) {
+  if (!file || convertingWhat) return;
+  if (file.size === 0) { toast("this file is empty"); return; }
+  if (file.size > FILE_BUDGET) {
+    toast(`this file is ${(file.size / 1024).toFixed(0)} KB — shared files must stay at or under 30 KB`);
+    return;
+  }
+  convertingWhat = "chat";
+  convertingKind = "file";
+  pendingFile = null;
+  pendingImg = null;
+  render();
+  try {
+    await pickFileAfterConvert(file);
   } finally {
     convertingWhat = "";
     render();
@@ -187,8 +277,10 @@ async function pickImage(file: Blob | null | undefined, what: PickTarget = "chat
 
 /** Inbound body: image frames are JSON with a whitelisted mime and a
  *  standard-b64 `d` (regex-validated so a crafted payload can never break
- *  out of the src attribute); anything else is plain text as before. */
-function parseChatBody(body: string): { text: string; img?: ImgMsg } {
+ *  out of the src attribute); file frames validate the same way plus an
+ *  atob round-trip, and their bytes are never rendered — only downloaded;
+ *  anything else is plain text as before. */
+function parseChatBody(body: string): { text: string; img?: ImgMsg; file?: FileMsg } {
   if (body.startsWith('{"ohimg"')) {
     try {
       const j = JSON.parse(body) as { ohimg?: { d?: unknown; w?: unknown; h?: unknown; m?: unknown }; t?: unknown };
@@ -203,6 +295,27 @@ function parseChatBody(body: string): { text: string; img?: ImgMsg } {
       }
     } catch { /* not an image frame — fall through to text */ }
   }
+  if (body.startsWith('{"ohfile"')) {
+    try {
+      const j = JSON.parse(body) as { ohfile?: { d?: unknown; n?: unknown; m?: unknown; s?: unknown }; t?: unknown };
+      const fl = j.ohfile;
+      if (
+        fl && typeof fl.d === "string" && fl.d.length >= 4 && fl.d.length <= 48000 &&
+        /^[A-Za-z0-9+/]+={0,2}$/.test(fl.d)
+      ) {
+        atob(fl.d); // throws on any non-quad length — the click-time decode must never fail
+        return {
+          text: typeof j.t === "string" ? j.t : "",
+          file: mintFileMsg({
+            d: fl.d,
+            n: safeFileName(fl.n) || "file",
+            m: safeMime(fl.m),
+            s: Math.max(1, Math.min(FILE_BUDGET, Math.round(Number(fl.s) || (fl.d.length * 3) / 4))),
+          }),
+        };
+      }
+    } catch { /* not a file frame — fall through to text */ }
+  }
   return { text: body };
 }
 
@@ -215,15 +328,41 @@ function mailFits(env: Envelope): boolean {
 
 const PAPERCLIP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`;
 
+const FILEICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M12 18v-6"/><path d="m9 15 3 3 3-3"/></svg>`;
+
+/** Decode a file frame's bytes into a blob URL on first click (cached on
+ *  the message) — created inside the user gesture, so downloads work in
+ *  every browser without ever rendering the content. The blob is typed
+ *  octet-stream on purpose: the download always saves, never opens. */
+function fileDownloadUrl(f: FileMsg): string {
+  if (!f.url) {
+    const bin = atob(f.d);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    f.url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+  }
+  return f.url;
+}
+
+function triggerFileDownload(f: FileMsg) {
+  const a = document.createElement("a");
+  a.href = fileDownloadUrl(f);
+  a.download = f.n;
+  a.click();
+}
+
+// The composer picker takes pictures AND files: pictures take the
+// re-encode ladder, everything else the raw-bytes path (≤30 KB).
 const imgInput = document.createElement("input");
 imgInput.type = "file";
-imgInput.accept = "image/*";
 imgInput.style.display = "none";
 document.body.appendChild(imgInput);
 imgInput.addEventListener("change", () => {
   const f = imgInput.files?.[0];
   imgInput.value = ""; // allow re-picking the same file
-  void pickImage(f);
+  if (!f) return;
+  if (f.type.startsWith("image/")) void pickImage(f);
+  else void pickFile(f);
 });
 
 function hiddenFilePicker(onPick: (f: Blob) => void): HTMLInputElement {
@@ -786,7 +925,7 @@ class Portal {
       if (seq <= (this.seenSeq.get(sender) ?? 0)) return; // replay guard
       this.seenSeq.set(sender, seq);
       const pm = parseChatBody(body);
-      this.msgs.push({ ts: Date.now(), sender, name: this.displayName(sender), body: pm.text, out: false, img: pm.img });
+      this.msgs.push({ ts: Date.now(), sender, name: this.displayName(sender), body: pm.text, out: false, img: pm.img, file: pm.file });
       return;
     }
     if ("Members" in env) {
@@ -1062,23 +1201,26 @@ class Portal {
       this.lastSeen.clear();
       this.capable.clear();
       this.status = "";
+      clearFileMsgs(); // file chips die with the room they arrived in
     }
   }
 
-  async send(text: string, img?: ImgPayload) {
+  async send(text: string, img?: ImgPayload, file?: FilePayload) {
     const body = text.trim();
-    if (!this.room || (!body && !img)) return;
+    if (!this.room || (!body && !img && !file)) return;
     this.mySeq++;
-    // Wire payload is exactly {d,w,h,m}: callers hold richer objects
-    // (PendingImg carries src+bytes) — never fold those into the frame.
+    // Wire payloads are exactly {d,w,h,m} / {d,n,m,s}: callers hold richer
+    // objects (PendingImg carries src+bytes) — never fold those into frames.
     const frame = img
       ? this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(JSON.stringify({ ohimg: { d: img.d, w: img.w, h: img.h, m: img.m }, t: body })), true)
-      : this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(text));
+      : file
+        ? this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(JSON.stringify({ ohfile: { d: file.d, n: file.n, m: file.m, s: file.s }, t: body })), true)
+        : this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(text));
     if (!mailFits({ Chat: { frame } })) {
-      toast("this image didn't fit the mail limit — nothing was sent");
+      toast("this attachment didn't fit the mail limit — nothing was sent");
       return;
     }
-    this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined });
+    this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
     render();
     await this.fanOut({ Chat: { frame } });
   }
@@ -1191,22 +1333,24 @@ class Portal {
     await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, [{ to: dm.peer, env: inv }]).catch(() => {});
   }
 
-  async sendDm(hex: string, text: string, img?: ImgPayload) {
+  async sendDm(hex: string, text: string, img?: ImgPayload, file?: FilePayload) {
     const dm = this.dms.get(hex);
     const body = text.trim();
-    if (!dm || (!body && !img)) return;
+    if (!dm || (!body && !img && !file)) return;
     dm.mySeq++;
     const frame = img
       ? dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(JSON.stringify({ ohimg: { d: img.d, w: img.w, h: img.h, m: img.m }, t: body })), true)
-      : dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(text));
+      : file
+        ? dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(JSON.stringify({ ohfile: { d: file.d, n: file.n, m: file.m, s: file.s }, t: body })), true)
+        : dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(text));
     if (!mailFits({ Chat: { frame } })) {
-      toast("this image didn't fit the mail limit — nothing was sent");
+      toast("this attachment didn't fit the mail limit — nothing was sent");
       return;
     }
     // Count the send only now: the split-brain adoption rule keys off
     // frames actually sent under our key.
     dm.sent++;
-    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined });
+    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
     render();
     const batch: Array<{ to: string; env: Envelope }> = [{ to: dm.peer, env: { Chat: { frame } } }];
     if (dm.unconfirmed) {
@@ -1231,7 +1375,7 @@ class Portal {
     dm.seenSeq = frame.seq;
     dm.unconfirmed = false;
     const pm = parseChatBody(body);
-    dm.msgs.push({ ts: Date.now(), sender: from, name: this.displayName(from), body: pm.text, out: false, img: pm.img });
+    dm.msgs.push({ ts: Date.now(), sender: from, name: this.displayName(from), body: pm.text, out: false, img: pm.img, file: pm.file });
     if (activeRoom !== frame.room_id_hex) dm.unread++;
   }
 
@@ -1436,8 +1580,10 @@ function openMenu(anchor: HTMLElement, items: MenuItem[]) {
     }
     const b = document.createElement("button");
     b.className = "menu-item";
+    // label/hint are peer-influenced (member names, bios) — escape at the
+    // sink; `icon` is the one trusted-HTML parameter (built locally).
     b.innerHTML = `${it.icon ? `<span class="mi-icon">${it.icon}</span>` : ""}
-      <span class="mi-text"><span class="mi-label">${it.label}</span>${it.hint ? `<span class="mi-hint">${it.hint}</span>` : ""}</span>`;
+      <span class="mi-text"><span class="mi-label">${esc(it.label)}</span>${it.hint ? `<span class="mi-hint">${esc(it.hint)}</span>` : ""}</span>`;
     b.addEventListener("click", (e) => {
       e.stopPropagation();
       closeMenus();
@@ -1475,13 +1621,18 @@ function msgHtml(m: Msg): string {
   const img = m.img
     ? `<img class="msgimg" src="${m.img.src}" style="aspect-ratio:${m.img.w} / ${m.img.h}" alt="shared image" loading="lazy">`
     : "";
+  // Bytes stay off the DOM — the chip carries only the lookup id; the
+  // blob URL is minted inside the click (see the p-msgs click handler).
+  const file = m.file
+    ? `<button class="msgfile" type="button" data-fid="${m.file.id}" title="download — sealed end-to-end, decoded on your device"><span class="mf-icon">${FILEICON}</span><span class="mf-body"><span class="mf-name">${esc(m.file.n)}</span><span class="mf-meta">${m.file.s < 1024 ? `${m.file.s} B` : `${(m.file.s / 1024).toFixed(1)} KB`} · ${ACTIVE_TYPES.has(m.file.m) ? "web page file — careful" : "download"}</span></span></button>`
+    : "";
   const cap = m.body ? esc(m.body) : "";
-  const cls = m.img ? "msg hasimg" : "msg";
-  if (m.out) return `<div class="${cls} out">${cap}${img}${meta}</div>`;
+  const cls = m.img || m.file ? `msg hasimg${m.file ? " hasfile" : ""}` : "msg";
+  if (m.out) return `<div class="${cls} out">${cap}${img}${file}${meta}</div>`;
   const hue = peerHue(m.sender);
   return `
     <div class="sender" style="color:hsl(${hue} 65% 70%)">${esc(m.name)}</div>
-    <div class="${cls} in">${cap}${img}${meta}</div>`;
+    <div class="${cls} in">${cap}${img}${file}${meta}</div>`;
 }
 
 /// Unread DMs surface in the tab title — the only channel that signals
@@ -1677,16 +1828,27 @@ function render() {
           ${activeDm && activeDm.msgs.length === 0 ? `<div class="chat-hint">This is a sealed two-person room — only you and ${esc(dmName(activeDm.peer))} hold this key.</div>` : ""}
           ${(activeDm ? activeDm.msgs : portal.msgs).map(msgHtml).join("")}
         </div>
-        ${(pendingImg || convertingWhat === "chat") ? `
+        ${(() => {
+          if (!pendingImg && !pendingFile && convertingWhat !== "chat") return "";
+          if (convertingWhat === "chat" || (!pendingImg && !pendingFile)) return `
         <div class="imgqueue">
-          ${convertingWhat === "chat" || !pendingImg ? `<span class="spin"></span><span class="iq-meta">shrinking the image to 30 KB…</span>` : `
-            <img class="iq-thumb" src="${pendingImg.src}" alt="">
-            <span class="iq-meta">${(pendingImg.bytes / 1024).toFixed(1)} KB · ${pendingImg.w}×${pendingImg.h} · ready — Enter sends</span>
-            <button id="p-imgx" class="iq-x" type="button" title="remove the image" aria-label="remove the image">✕</button>`}
-        </div>` : ""}
+          <span class="spin"></span><span class="iq-meta">${convertingKind === "file" ? "reading the file…" : "shrinking the image to 30 KB…"}</span>
+        </div>`;
+          const pi = pendingImg, pf = pendingFile;
+          return `
+        <div class="imgqueue">
+          ${pi ? `
+            <img class="iq-thumb" src="${pi.src}" alt="">
+            <span class="iq-meta">${(pi.bytes / 1024).toFixed(1)} KB · ${pi.w}×${pi.h} · ready — Enter sends</span>
+            <button id="p-imgx" class="iq-x" type="button" title="remove the image" aria-label="remove the image">✕</button>` : `
+            <span class="iq-ficon">${FILEICON}</span>
+            <span class="iq-meta">${esc(pf!.n)} · ${pf!.s < 1024 ? `${pf!.s} B` : `${(pf!.s / 1024).toFixed(1)} KB`} · sent as-is${pf!.m.startsWith("image/") ? " — metadata kept" : ""} — Enter sends</span>
+            <button id="p-filex" class="iq-x" type="button" title="remove the file" aria-label="remove the file">✕</button>`}
+        </div>`;
+        })()}
         <div class="composer">
-          <button id="p-attach" class="attach" type="button" title="attach an image — re-encoded on your device to 30 KB or less (EXIF stripped)" aria-label="attach an image">${PAPERCLIP}</button>
-          <textarea id="p-send" rows="1" placeholder="${pendingImg ? "caption (optional)…" : activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
+          <button id="p-attach" class="attach" type="button" title="attach a picture or a file — pictures are re-encoded on your device to 30 KB or less (EXIF stripped); files up to 30 KB travel as-is" aria-label="attach a picture or file">${PAPERCLIP}</button>
+          <textarea id="p-send" rows="1" placeholder="${pendingImg || pendingFile ? "caption (optional)…" : activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
           <button id="p-sendbtn" class="primary" type="button">Send</button>
         </div>
       </div>` : `
@@ -1937,22 +2099,29 @@ function render() {
   const ta = $("p-send") as HTMLTextAreaElement | null;
   const sendIt = () => {
     const v = ta!.value.replace(/\s+$/, "");
-    if (!v.trim() && !pendingImg) { ta!.value = ""; autosize(ta!); return; }
+    if (!v.trim() && !pendingImg && !pendingFile) { ta!.value = ""; autosize(ta!); return; }
     const img = pendingImg ?? undefined;
+    const file = pendingFile ?? undefined;
     pendingImg = null;
+    pendingFile = null;
     ta!.value = "";
     autosize(ta!);
-    if (activeDm && activeRoom) void portal.sendDm(activeRoom, v, img);
-    else void portal.send(v, img);
+    if (activeDm && activeRoom) void portal.sendDm(activeRoom, v, img, file);
+    else void portal.send(v, img, file);
   };
   if (ta) {
     ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendIt(); } });
     ta.addEventListener("input", () => autosize(ta));
-    // Pasting a screenshot grabs the image; pasting text still works.
+    // Pasting a screenshot grabs the image; pasting a copied file grabs
+    // the file; pasting text still works.
     ta.addEventListener("paste", (e) => {
-      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.kind === "file" && i.type.startsWith("image/"));
-      const f = item?.getAsFile();
-      if (f) { e.preventDefault(); void pickImage(f); }
+      const items = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file");
+      const pick = items.find((i) => i.type.startsWith("image/")) ?? items[0];
+      const f = pick?.getAsFile();
+      if (!f) return;
+      e.preventDefault();
+      if (f.type.startsWith("image/")) void pickImage(f);
+      else void pickFile(f);
     });
     if (sendState) {
       ta.value = sendState.value;
@@ -1964,12 +2133,21 @@ function render() {
   $("p-sendbtn")?.addEventListener("click", sendIt);
   $("p-attach")?.addEventListener("click", () => imgInput.click());
   $("p-imgx")?.addEventListener("click", () => { pendingImg = null; render(); });
+  $("p-filex")?.addEventListener("click", () => { pendingFile = null; render(); });
   const box = $("p-msgs");
   if (box) {
     box.scrollTop = box.scrollHeight;
+    // Click a shared file chip to download it — decoded and re-blobbed
+    // here, inside the gesture, so no content ever renders inline.
     // Click a shared image to view it full size. The window opens
     // synchronously (popup blockers) and gets a blob URL once decoded.
     box.addEventListener("click", (e) => {
+      const fb = (e.target as Element).closest("button.msgfile");
+      if (fb) {
+        const f = fileById.get(fb.getAttribute("data-fid") ?? "");
+        if (f) triggerFileDownload(f);
+        return;
+      }
       const t = e.target as HTMLElement;
       if (t.tagName !== "IMG" || !t.classList.contains("msgimg")) return;
       const w = window.open("", "_blank");
@@ -1990,7 +2168,9 @@ function render() {
       e.preventDefault();
       box.classList.remove("dropglow");
       const f = e.dataTransfer?.files?.[0];
-      if (f && f.type.startsWith("image/")) void pickImage(f);
+      if (!f) return;
+      if (f.type.startsWith("image/")) void pickImage(f);
+      else void pickFile(f);
     });
   }
 }
@@ -2016,6 +2196,7 @@ async function doJoin() {
   portal.profSeen.clear();
   portal.profSentTo.clear();
   portal.msgs = [];
+  clearFileMsgs();
   portal.roomImg = { img: "", ts: 0, by: "" };
   activeRoom = null;
   editingProfile = false;
@@ -2068,7 +2249,7 @@ window.addEventListener("pagehide", () => {
 });
 
 // Console hook for e2e/debugging (same spirit as __ohPortal).
-(window as any).__ohImg = { pickImage, fileToImagePayload, parseChatBody, mailFits, pending: () => pendingImg };
+(window as any).__ohImg = { pickImage, pickFile, fileToImagePayload, parseChatBody, mailFits, triggerFileDownload, pending: () => pendingImg, pendingFile: () => pendingFile };
 // Liveness e2e hook: frame kinds (to forge/craft sealed frames) and the
 // liveness tunables already sit on __ohPortal as fields.
 (window as any).__ohLive = { KIND };
