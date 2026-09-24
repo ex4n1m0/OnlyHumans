@@ -19,7 +19,7 @@
 <meta property="og:image:alt" content="OnlyHumans — private chat rooms in any browser. Every word is a key.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://onlyhumans.deepflux.space/og-image.png">
-<link rel="preload" as="script" href="/join-assets/portal-LATZHQT2.js">
+<link rel="preload" as="script" href="/join-assets/portal-LJT7I4TK.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -369,6 +369,11 @@
   .gaterem input { width: auto; flex-shrink: 0; accent-color: var(--teal); }
   .gatehint { color: var(--danger); font-size: .85rem; margin-top: .4rem; }
   .gatebuild { color: #56707c; font-size: 10px; letter-spacing: .06em; margin-top: .8rem; user-select: none; }
+  /* quiet language toggle under the build line — shows the language you'd
+     switch to (English ↔ 简体中文), writes the shared oh-lang key */
+  .gatelang { background: none; border: 0; padding: 0; margin-top: .3rem;
+              color: #56707c; font-size: 10px; letter-spacing: .06em; cursor: pointer; }
+  .gatelang:hover { color: var(--teal); }
 
   /* phones: keep the single-column chat, fold the chrome away, and keep
      every field ≥16px — iOS zooms the page on focus otherwise, which
@@ -404,6 +409,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-LATZHQT2.js" defer></script>
+<script src="/join-assets/portal-LJT7I4TK.js" defer></script>
 </body>
 </html>

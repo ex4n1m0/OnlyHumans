@@ -49,6 +49,325 @@ const BROWSER = (() => {
   return `${name} · ${os}`;
 })();
 
+// ------------------------------------------------------------- language
+// docs/chinese-simplified-study.md: one shared key with the landing
+// (oh-lang — the landing's dropdown writes it, the portal follows, the
+// identity menu / gate footer can flip it). Strings captured at event
+// time (log lines, narration, statuses) translate when they happen;
+// history keeps the language it was made in. Brand names and typed
+// literals (earth, build hashes) are never translated.
+type Lang = "en" | "zh";
+const STR: Record<Lang, Record<string, string>> = {
+  en: {
+    "doc.title": "Join a room — OnlyHumans",
+    "gate.top": "Private Chat Rooms",
+    "gate.slogan": "Every Word is a Key",
+    "gate.namePh": "your name…",
+    "gate.wordPh": "room word",
+    "gate.enter": "Enter the room",
+    "gate.rememberTitle": "saves your name and your recently used room words in this browser — nothing else, and unchecking removes it",
+    "gate.remember": "remember my name and rooms on this device",
+    "gate.build": "browser portal · build {b}",
+    "gate.errName": "A name is required.",
+    "invite.text": "Join me in a room on OnlyHumans — open this link, type any name, press Enter: {u}",
+    "st.starting": "starting…",
+    "st.finding": "finding the room…",
+    "st.fetchBase": "fetching the room base…",
+    "st.derive": "deriving the room from your word…",
+    "st.register": "registering with the site…",
+    "st.rejoin": "rejoining the room…",
+    "st.askSeat": "asking host {h}… for a seat (attempt {n}) — their tab must be open",
+    "log.contact": "contacting the site…",
+    "log.siteOk": "the site answered",
+    "log.siteDown": "the site is not answering — retrying",
+    "log.firstFail": "first contact with the site failed — the connection loop takes over",
+    "log.joinRetry": "could not finish joining — retrying in the background",
+    "log.founded": "this tab created the room and is holding it open",
+    "log.seatAsk": "seat request #{n} mailed to host {h}…",
+    "log.seatRefused": "the site refused the seat request — retrying",
+    "log.noHost": "no host on the site — claiming the room",
+    "log.yieldHost": "another tab holds the room now — switching to a seat",
+    "log.warped": "warped to universe {e} — the word's record will lapse",
+    "log.successor": "seated {n} into the word's fresh universe — we stay in {e}",
+    "log.takeover": "the host left — this tab took over the room",
+    "log.seatedBy": "seated by host {h}… — universe {e}",
+    "log.seatedJoin": "seated {n} — key sent",
+    "log.dmOpened": "private chat with {n} opened",
+    "log.reseatList": "the host's list no longer has us — re-seating",
+    "log.reseatLeft": "the host left — finding the room again",
+    "log.reseatSilent": "the host dropped our seat for silence — rejoining",
+    "nar.otherHost": "· another live host holds the room",
+    "nar.warped": "· warped to universe {e} — the word now starts a fresh room",
+    "nar.drifted": "· {n} drifted off",
+    "nar.hostLeft": "· the host left — this tab keeps the room open",
+    "nar.left": "· {n} left",
+    "nar.joined": "· {n} joined",
+    "toast.imgFallback": "couldn't re-encode this picture here — it's queued as a file, sent as-is with its metadata",
+    "toast.imgUnreadable": "couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to size on your device",
+    "toast.fileUnreadable": "couldn't read this file",
+    "toast.fileEmpty": "this file is empty",
+    "toast.fileBig": "this file is {n} KB — shared files must stay at or under 30 KB",
+    "toast.mailCap": "this attachment didn't fit the mail limit — nothing was sent",
+    "toast.invite": "Invite link copied — the room word is already inside it",
+    "cmd.switchRoom": "switch between the room and your private chats",
+    "cmd.editProfileTitle": "edit my profile — photo, name, bio, this room's picture",
+    "cmd.editProfile": "Edit my profile",
+    "cmd.yourProfile": "your profile",
+    "side.people": "people in the room",
+    "side.you": "this is you",
+    "side.youTag": " (you)",
+    "side.you2": "you",
+    "side.viaSite": "via site",
+    "side.dmTitle": "private chat with {n}",
+    "side.dm": "⇄ message",
+    "side.dms": "private chats",
+    "side.unread": "{n} unread",
+    "side.invited": "invited",
+    "side.justTwo": "just you two",
+    "tb.private": "private",
+    "tb.dmSub": "vanishes when you both leave · sealed with a key only you two hold",
+    "tb.back": "back to the room (Esc)",
+    "tb.backBtn": "‹ room",
+    "tb.peopleTitle": "people in this room",
+    "tb.inRoom": "{n} in room",
+    "tb.warpTitle": "move everyone here into a new universe — the word will start a fresh room for whoever types it next",
+    "tb.warp": "✦ Warp",
+    "tb.inviteTitle": "copy a link that opens this room — the word is already in it",
+    "tb.invite": "＋ Invite",
+    "hint.earthAlone": `You're in Earth — everyone who uses this word joins this room. Say hi, or <button id="p-invite-empty" class="linklike">invite a friend</button>.`,
+    "hint.earthOthers": "You're in Earth — everyone who uses this word joins this room. Say hi.",
+    "hint.wordAlone": `Nobody else has used this word yet — they land here the moment they type the same one. <button id="p-invite-empty" class="linklike">Invite someone</button>`,
+    "hint.wordOthers": "You're in — only people who typed this room's word can be here.",
+    "hint.dm": "This is a sealed two-person room — only you and {n} hold this key.",
+    "hint.keepOpen": "Keep this tab open — the other side lands here the moment it uses the same word. Phones pause a tab when the screen locks; picking the phone back up reconnects it instantly.",
+    "iq.readingFile": "reading the file…",
+    "iq.shrinking": "shrinking the image to 30 KB…",
+    "iq.ready": "ready — Enter sends",
+    "iq.sentAsIs": "sent as-is",
+    "iq.metaKept": "metadata kept",
+    "iq.enterSends": "Enter sends",
+    "iq.removeImg": "remove the image",
+    "iq.removeFile": "remove the file",
+    "cp.emojiTitle": "insert an emoji",
+    "cp.attachTitle": "attach a picture or a file — pictures are re-encoded on your device to 30 KB or less (EXIF stripped); files up to 30 KB travel as-is",
+    "cp.attachAria": "attach a picture or file",
+    "cp.caption": "caption (optional)…",
+    "cp.dmPh": "message privately… (Enter sends)",
+    "cp.roomPh": "message the room… (Enter sends)",
+    "cp.sendTitle": "Enter sends · Shift+Enter adds a newline",
+    "cp.send": "Send",
+    "msg.viaTitle": "travelled end-to-end sealed through the site's mailbox",
+    "msg.imgAlt": "shared image",
+    "msg.fileTitle": "download — sealed end-to-end, decoded on your device",
+    "msg.webFile": "web page file — careful",
+    "msg.download": "download",
+    "msg.you": "you",
+    "msg.reactTitle": "react to this message",
+    "msg.reactAria": "add a reaction",
+    "pf.sheetAria": "edit my profile",
+    "pf.title": "Your profile",
+    "pf.photo": "Photo…",
+    "pf.remove": "remove",
+    "pf.name": "name",
+    "pf.bio": "bio",
+    "pf.bioPh": "a line about you — shown to people in the room",
+    "pf.roomTitle": "This room's picture",
+    "pf.picture": "Picture…",
+    "pf.cancel": "Cancel",
+    "pf.save": "Save",
+    "pf.note": "Everything here is session-only — it travels sealed to people in the room and vanishes when the tab closes. Nothing is stored anywhere.",
+    "menu.buildHeader": "{n} · portal build {b}",
+    "menu.logoff": "Log off",
+    "menu.logoffHint": "back to the join screen — your key stays in this browser",
+    "menu.browserLine": "{b} · Enter sends, Shift+Enter newline",
+    "menu.lang": "Language / 语言",
+    "menu.langHintEn": "switch to 简体中文",
+    "menu.langHintZh": "切换到 English",
+    "menu.warpQ": "warp to universe {n}?",
+    "menu.warpGo": "✦ Warp",
+    "menu.warpHint": "everyone here moves to a new key; the word founds a fresh room for newcomers",
+    "menu.stay": "stay here",
+    "menu.stayHint": "universe {n} keeps going",
+    "menu.switch": "switch conversation",
+    "menu.peopleRoom": "people in the room · {w}",
+    "menu.thisDeviceHost": "this device — holding the room open",
+    "menu.thisDevice": "this device",
+    "menu.holdingOpen": "holding the room open",
+    "menu.startDm": "start a private chat",
+    "menu.dms": "private chats",
+    "menu.roomEpoch": "{w} · universe {e}",
+    "emj.faces": "faces", "emj.hands": "hands", "emj.hearts": "hearts",
+    "emj.nature": "nature", "emj.animals": "animals", "emj.food": "food",
+    "emj.play": "play", "emj.travel": "travel", "emj.things": "things",
+    "emj.signs": "signs", "emj.recent": "recent", "emj.react": "react",
+    "emj.more": "more emoji",
+  },
+  zh: {
+    "doc.title": "加入房间 — OnlyHumans",
+    "gate.top": "私密聊天室",
+    "gate.slogan": "每个词都是一把钥匙",
+    "gate.namePh": "你的名字…",
+    "gate.wordPh": "房间词",
+    "gate.enter": "进入房间",
+    "gate.rememberTitle": "在此浏览器中保存你的名字和最近使用的房间词——仅此而已；取消勾选即删除",
+    "gate.remember": "在此设备上记住我的名字和房间",
+    "gate.build": "网页版 · 构建 {b}",
+    "gate.errName": "请输入名字。",
+    "invite.text": "来 OnlyHumans 的房间找我——打开这个链接，随便取个名字，按 Enter 进入：{u}",
+    "st.starting": "正在启动…",
+    "st.finding": "正在寻找房间…",
+    "st.fetchBase": "正在获取房间基础…",
+    "st.derive": "正在从你的词推导房间…",
+    "st.register": "正在向站点注册…",
+    "st.rejoin": "正在重新加入房间…",
+    "st.askSeat": "正在向房主 {h}… 请求席位（第 {n} 次尝试）——对方的标签页必须保持打开",
+    "log.contact": "正在联系站点…",
+    "log.siteOk": "站点已响应",
+    "log.siteDown": "站点无响应——正在重试",
+    "log.firstFail": "与站点的首次联系失败——连接循环将接管",
+    "log.joinRetry": "未能完成加入——正在后台重试",
+    "log.founded": "此标签页创建了房间并将其保持开放",
+    "log.seatAsk": "席位请求 #{n} 已邮寄给房主 {h}…",
+    "log.seatRefused": "站点拒绝了席位请求——正在重试",
+    "log.noHost": "站点上没有房主——正在认领房间",
+    "log.yieldHost": "另一个标签页现在持有房间——切换为席位",
+    "log.warped": "已跃迁到宇宙 {e}——该词的记录将失效",
+    "log.successor": "已将 {n} 安置进该词的新宇宙——我们留在 {e}",
+    "log.takeover": "房主离开了——此标签页接管了房间",
+    "log.seatedBy": "已被房主 {h}… 安置——宇宙 {e}",
+    "log.seatedJoin": "已安置 {n}——密钥已发送",
+    "log.dmOpened": "与 {n} 的私聊已打开",
+    "log.reseatList": "房主的名单里已没有我们——正在重新入座",
+    "log.reseatLeft": "房主离开了——正在重新寻找房间",
+    "log.reseatSilent": "房主因沉默撤回了我们的席位——正在重新加入",
+    "nar.otherHost": "· 另一个在线房主持有该房间",
+    "nar.warped": "· 已跃迁到宇宙 {e}——该词现在会开启一间新房间",
+    "nar.drifted": "· {n} 悄然离线",
+    "nar.hostLeft": "· 房主离开了——此标签页维持房间开放",
+    "nar.left": "· {n} 离开了",
+    "nar.joined": "· {n} 加入了",
+    "toast.imgFallback": "无法在此重新编码这张图片——已按原文件排队，将连同其元数据原样发送",
+    "toast.imgUnreadable": "无法读取这张图片——某些格式（如 HEIC）在此不受支持，且图片必须在你的设备上完成压缩",
+    "toast.fileUnreadable": "无法读取此文件",
+    "toast.fileEmpty": "此文件是空的",
+    "toast.fileBig": "此文件有 {n} KB——共享文件不得超过 30 KB",
+    "toast.mailCap": "此附件超出了邮件上限——未发送任何内容",
+    "toast.invite": "邀请链接已复制——房间词已包含在内",
+    "cmd.switchRoom": "在房间与你的私聊之间切换",
+    "cmd.editProfileTitle": "编辑我的资料——照片、名字、简介、本房间图片",
+    "cmd.editProfile": "编辑我的资料",
+    "cmd.yourProfile": "你的资料",
+    "side.people": "房间里的人",
+    "side.you": "这是你",
+    "side.youTag": "（你）",
+    "side.you2": "你",
+    "side.viaSite": "经由站点",
+    "side.dmTitle": "与 {n} 私聊",
+    "side.dm": "⇄ 私聊",
+    "side.dms": "私聊",
+    "side.unread": "{n} 条未读",
+    "side.invited": "已邀请",
+    "side.justTwo": "只有你们两个",
+    "tb.private": "私聊",
+    "tb.dmSub": "两人都离开后即消失 · 由只有你们两个持有的密钥密封",
+    "tb.back": "返回房间（Esc）",
+    "tb.backBtn": "‹ 房间",
+    "tb.peopleTitle": "本房间的人",
+    "tb.inRoom": "房间内 {n} 人",
+    "tb.warpTitle": "把这里的所有人迁移到新宇宙——这个词之后将为下一位输入它的人开启一间全新房间",
+    "tb.warp": "✦ 跃迁",
+    "tb.inviteTitle": "复制一个可打开本房间的链接——房间词已包含在内",
+    "tb.invite": "＋ 邀请",
+    "hint.earthAlone": `你在 earth——每个使用这个词的人都会进入这间房间。打个招呼，或者<button id="p-invite-empty" class="linklike">邀请朋友</button>。`,
+    "hint.earthOthers": "你在 earth——每个使用这个词的人都会进入这间房间。打个招呼。",
+    "hint.wordAlone": `还没有其他人用过这个词——有人输入相同的词时会立刻来到这里。<button id="p-invite-empty" class="linklike">邀请一个人</button>`,
+    "hint.wordOthers": "你已进入——只有输入过本房间词的人才会在这里。",
+    "hint.dm": "这是一间密封的二人房间——只有你和 {n} 持有这把钥匙。",
+    "hint.keepOpen": "请保持此标签页打开——对方一使用相同的词就会来到这里。手机锁屏时标签页会暂停；拿起手机即可立刻重连。",
+    "iq.readingFile": "正在读取文件…",
+    "iq.shrinking": "正在把图片压缩到 30 KB…",
+    "iq.ready": "就绪——按 Enter 发送",
+    "iq.sentAsIs": "原样发送",
+    "iq.metaKept": "保留元数据",
+    "iq.enterSends": "按 Enter 发送",
+    "iq.removeImg": "移除图片",
+    "iq.removeFile": "移除文件",
+    "cp.emojiTitle": "插入表情",
+    "cp.attachTitle": "附加图片或文件——图片会在你的设备上重新编码到 30 KB 以内（EXIF 一并去除）；不超过 30 KB 的文件原样传输",
+    "cp.attachAria": "附加图片或文件",
+    "cp.caption": "说明文字（可选）…",
+    "cp.dmPh": "私聊消息…（按 Enter 发送）",
+    "cp.roomPh": "发送到房间…（按 Enter 发送）",
+    "cp.sendTitle": "Enter 发送 · Shift+Enter 换行",
+    "cp.send": "发送",
+    "msg.viaTitle": "经端到端密封、通过站点中转邮箱送达",
+    "msg.imgAlt": "共享的图片",
+    "msg.fileTitle": "下载——端到端密封，在你的设备上解码",
+    "msg.webFile": "网页文件——小心",
+    "msg.download": "下载",
+    "msg.you": "你",
+    "msg.reactTitle": "回应这条消息",
+    "msg.reactAria": "添加回应",
+    "pf.sheetAria": "编辑我的资料",
+    "pf.title": "你的资料",
+    "pf.photo": "照片…",
+    "pf.remove": "移除",
+    "pf.name": "名字",
+    "pf.bio": "简介",
+    "pf.bioPh": "一句关于你的介绍——房间里的其他人可见",
+    "pf.roomTitle": "本房间的图片",
+    "pf.picture": "图片…",
+    "pf.cancel": "取消",
+    "pf.save": "保存",
+    "pf.note": "这里的所有内容仅限本次会话——以密封方式发给房间里的人，标签页关闭后即消失。不会在任何地方存储。",
+    "menu.buildHeader": "{n} · 网页版构建 {b}",
+    "menu.logoff": "退出",
+    "menu.logoffHint": "返回加入界面——你的密钥仍保留在此浏览器中",
+    "menu.browserLine": "{b} · Enter 发送，Shift+Enter 换行",
+    "menu.lang": "语言 / Language",
+    "menu.langHintEn": "切换到简体中文",
+    "menu.langHintZh": "切换到 English",
+    "menu.warpQ": "跃迁到宇宙 {n}？",
+    "menu.warpGo": "✦ 跃迁",
+    "menu.warpHint": "这里的所有人换用新密钥；该词将为后来者另开一间新房间",
+    "menu.stay": "留在这里",
+    "menu.stayHint": "宇宙 {n} 继续",
+    "menu.switch": "切换对话",
+    "menu.peopleRoom": "房间里的人 · {w}",
+    "menu.thisDeviceHost": "此设备——正保持房间开放",
+    "menu.thisDevice": "此设备",
+    "menu.holdingOpen": "正保持房间开放",
+    "menu.startDm": "开始一场私聊",
+    "menu.dms": "私聊",
+    "menu.roomEpoch": "{w} · 宇宙 {e}",
+    "emj.faces": "表情", "emj.hands": "手势", "emj.hearts": "爱心",
+    "emj.nature": "自然", "emj.animals": "动物", "emj.food": "食物",
+    "emj.play": "玩乐", "emj.travel": "旅行", "emj.things": "物品",
+    "emj.signs": "符号", "emj.recent": "最近", "emj.react": "回应",
+    "emj.more": "更多表情",
+  },
+};
+
+let LANG: Lang = (() => {
+  try {
+    const s = localStorage.getItem("oh-lang");
+    if (s === "zh" || s === "en") return s;
+  } catch { /* private mode — fall through to detection */ }
+  return /^zh\b/i.test(navigator.language || "") ? "zh" : "en";
+})();
+
+function setLang(lang: Lang) {
+  LANG = lang;
+  try { localStorage.setItem("oh-lang", lang); } catch { /* fine */ }
+  render();
+}
+
+function t(key: string, params?: Record<string, string | number>): string {
+  let s = STR[LANG][key] ?? STR.en[key] ?? key;
+  if (params) for (const k in params) s = s.split("{" + k + "}").join(String(params[k]));
+  return s;
+}
+
 /** A reaction frame's validated body: react to `s`'s message number `q`
  *  with `e` (x = remove mine). The reactor is always the FRAME sender —
  *  the body only selects the target, so attribution can't be forged. */
@@ -251,9 +570,9 @@ async function pickImage(file: Blob | null | undefined, what: PickTarget = "chat
     // the metadata (EXIF, location) stays in — the warning is explicit.
     if (what === "chat" && file.size <= FILE_BUDGET) {
       await pickFileAfterConvert(file);
-      toast("couldn't re-encode this picture here — it's queued as a file, sent as-is with its metadata");
+      toast(t("toast.imgFallback"));
     } else {
-      toast("couldn't read this image — some formats (like HEIC) aren't supported here, and pictures must shrink to size on your device");
+      toast(t("toast.imgUnreadable"));
     }
   } finally {
     convertingWhat = "";
@@ -266,14 +585,14 @@ async function pickImage(file: Blob | null | undefined, what: PickTarget = "chat
 async function pickFileAfterConvert(file: Blob) {
   try {
     pendingFile = { d: await blobToStdB64(file), n: safeFileName((file as File).name) || "file", m: safeMime(file.type), s: file.size };
-  } catch { toast("couldn't read this file"); }
+  } catch { toast(t("toast.fileUnreadable")); }
 }
 
 async function pickFile(file: Blob | null | undefined) {
   if (!file || convertingWhat) return;
-  if (file.size === 0) { toast("this file is empty"); return; }
+  if (file.size === 0) { toast(t("toast.fileEmpty")); return; }
   if (file.size > FILE_BUDGET) {
-    toast(`this file is ${(file.size / 1024).toFixed(0)} KB — shared files must stay at or under 30 KB`);
+    toast(t("toast.fileBig", { n: (file.size / 1024).toFixed(0) }));
     return;
   }
   convertingWhat = "chat";
@@ -451,15 +770,15 @@ function openEmojiPop(at: HTMLElement | { x: number; y: number }, onPick: (g: st
   let full = !quick;
   const fill = () => {
     const recents = full && emojiRecents.length
-      ? `<div class="eg-cat">recent</div><div class="eg-row">${emojiRecents.map((g) => `<button type="button" class="eg" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`
+      ? `<div class="eg-cat">${t("emj.recent")}</div><div class="eg-row">${emojiRecents.map((g) => `<button type="button" class="eg" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`
       : "";
     p.innerHTML = `
-      ${!full ? `<div class="eg-cat">react</div>
+      ${!full ? `<div class="eg-cat">${t("emj.react")}</div>
         <div class="eg-row quick">${QUICK_REACT.map((g) => `<button type="button" class="eg big" data-g="${esc(g)}">${esc(g)}</button>`).join("")}
-          <button type="button" class="eg big" data-g="__more" title="more emoji">⋯</button></div>` : ""}
+          <button type="button" class="eg big" data-g="__more" title="${esc(t("emj.more"))}">⋯</button></div>` : ""}
       ${recents}
       ${full ? EMOJI_CATEGORIES.map(([label, glyphs]) =>
-        `<div class="eg-cat">${label}</div><div class="eg-row">${glyphs.split(" ").map((g) => `<button type="button" class="eg" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`).join("") : ""}`;
+        `<div class="eg-cat">${esc(t("emj." + label))}</div><div class="eg-row">${glyphs.split(" ").map((g) => `<button type="button" class="eg" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`).join("") : ""}`;
     p.querySelectorAll<HTMLButtonElement>("button.eg").forEach((b) => {
       b.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -568,7 +887,7 @@ class Portal {
   profSentTo = new Map<string, number>();
   presenceToken = hex(crypto.getRandomValues(new Uint8Array(16)));
   online = 0;
-  status = "starting…";
+  status = t("st.starting");
   /// Connection log + attempt bookkeeping, rendered live while we hold
   /// no seat. See ConnEvent.
   events: ConnEvent[] = [];
@@ -611,7 +930,7 @@ class Portal {
   noteSite(ok: boolean) {
     if (this.siteOk === ok) return;
     this.siteOk = ok;
-    this.logConn(ok ? "the site answered" : "the site is not answering — retrying", ok ? "ok" : "warn");
+    this.logConn(ok ? t("log.siteOk") : t("log.siteDown"), ok ? "ok" : "warn");
   }
 
   get sign() { return (m: Uint8Array) => ed25519.sign(m, this.seed); }
@@ -673,12 +992,12 @@ class Portal {
     this.word = word;
     this.left = false;
     this.identity();
-    setStatus("fetching the room base…");
+    setStatus(t("st.fetchBase"));
     await (this.gkPromise ?? this.fetchGk());
-    setStatus("deriving the room from your word…");
+    setStatus(t("st.derive"));
     this.egk = await this.stretch(word);
     this.roomHex = globalRoomHex(this.egk);
-    setStatus("registering with the site…");
+    setStatus(t("st.register"));
     // Best-effort first contact. A transient failure here (flaky cellular,
     // a refused request) must not bounce the user back to the gate: the
     // tab stays unseated and the connection loop retries aggressively.
@@ -695,7 +1014,7 @@ class Portal {
       this.noteSite(true);
     } catch {
       this.noteSite(false);
-      this.logConn("first contact with the site failed — the connection loop takes over", "warn");
+      this.logConn(t("log.firstFail"), "warn");
     }
     void this.beat();
     try {
@@ -719,7 +1038,7 @@ class Portal {
         }
       }
     } catch {
-      this.logConn("could not finish joining — retrying in the background", "warn");
+      this.logConn(t("log.joinRetry"), "warn");
     }
     this.loop();
   }
@@ -735,7 +1054,7 @@ class Portal {
     this.capable.clear();
     this.lastRefreshAt = Date.now();
     this.seatAttempts = 0;
-    this.logConn("this tab created the room and is holding it open", "ok");
+    this.logConn(t("log.founded"), "ok");
     this.ready();
   }
 
@@ -747,10 +1066,10 @@ class Portal {
     this.hostId = host;
     this.seatAttempts++;
     this.lastJoinMailAt = Date.now();
-    setStatus(`asking host ${host.slice(0, 8)}… for a seat (attempt ${this.seatAttempts}) — their tab must be open`);
-    this.logConn(`seat request #${this.seatAttempts} mailed to host ${host.slice(0, 8)}…`);
+    setStatus(t("st.askSeat", { h: host.slice(0, 8), n: this.seatAttempts }));
+    this.logConn(t("log.seatAsk", { n: this.seatAttempts, h: host.slice(0, 8) }));
     void this.hub.mailPush(this.peerId, this.pubB64, this.sign, host, [buildJoin(this.roomHex, this.peerId, this.name, this.egk)])
-      .catch(() => this.logConn("the site refused the seat request — retrying", "warn"));
+      .catch(() => this.logConn(t("log.seatRefused"), "warn"));
   }
 
   /// While we hold no room (host died, Join lost to the 32-item inbox cap,
@@ -767,7 +1086,7 @@ class Portal {
       if (!rec) {
         if (Date.now() - this.lastFoundTry < 10_000) return;
         this.lastFoundTry = Date.now();
-        this.logConn("no host on the site — claiming the room");
+        this.logConn(t("log.noHost"));
         const won = await this.hub.registerRoom(this.roomHex, this.peerId, this.pubB64, this.sign);
         if (won) this.found();
         return;
@@ -889,8 +1208,8 @@ class Portal {
       const rec = await this.hub.lookupRoom(this.roomHex);
       if (rec && rec.host_peer_id !== this.peerId) {
         this.isHost = false;
-        this.logConn("another tab holds the room now — switching to a seat", "warn");
-        this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· another live host holds the room", out: false });
+        this.logConn(t("log.yieldHost"), "warn");
+        this.msgs.push({ ts: Date.now(), sender: "", name: "", body: t("nar.otherHost"), out: false });
       }
     } catch { this.noteSite(false); /* retry next cycle */ }
   }
@@ -915,8 +1234,8 @@ class Portal {
     if (!mailFits({ Rotate: { frame } })) return;
     this.room.applyRotation(secret);
     this.lastHostContact = Date.now();
-    this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· warped to universe ${this.room.epoch} — the word now starts a fresh room`, out: false });
-    this.logConn(`warped to universe ${this.room.epoch} — the word's record will lapse`, "ok");
+    this.msgs.push({ ts: Date.now(), sender: "", name: "", body: t("nar.warped", { e: this.room.epoch }), out: false });
+    this.logConn(t("log.warped", { e: this.room.epoch }), "ok");
     render();
     await this.fanOut({ Rotate: { frame } });
   }
@@ -947,7 +1266,7 @@ class Portal {
         utf8(JSON.stringify({ members: list })));
       for (const p of this.successor.peers.keys()) if (p !== peer) batch.push({ to: p, env: { Members: { frame: mf } } });
     }
-    this.logConn(`seated ${name || peer.slice(0, 8)}… into the word's fresh universe — we stay in ${this.room.epoch}`, "ok");
+    this.logConn(t("log.successor", { n: name || peer.slice(0, 8), e: this.room.epoch }), "ok");
     await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
   }
 
@@ -982,11 +1301,11 @@ class Portal {
             const name = this.members.get(oldHost) ?? oldHost.slice(0, 10);
             this.members.delete(oldHost);
             this.lastSeen.delete(oldHost);
-            this.msgs.push({ ts: now, sender: "", name: "", body: `· ${name} drifted off`, out: false });
+            this.msgs.push({ ts: now, sender: "", name: "", body: t("nar.drifted", { n: name }), out: false });
           }
           for (const p of this.members.keys()) if (!this.lastSeen.has(p)) this.lastSeen.set(p, now);
-          this.logConn("the host left — this tab took over the room", "ok");
-          this.msgs.push({ ts: now, sender: "", name: "", body: "· the host left — this tab keeps the room open", out: false });
+          this.logConn(t("log.takeover"), "ok");
+          this.msgs.push({ ts: now, sender: "", name: "", body: t("nar.hostLeft"), out: false });
         }
       } catch { /* retry next cycle */ }
       return;
@@ -1037,7 +1356,7 @@ class Portal {
       this.lastPingAt = 0; // beat immediately: the host's prune clock starts at our Join
       this.seatAttempts = 0;
       this.status = "";
-      this.logConn(`seated by host ${from.slice(0, 8)}… — universe ${kd.epoch}`, "ok");
+      this.logConn(t("log.seatedBy", { h: from.slice(0, 8), e: kd.epoch }), "ok");
       this.profilePush(); // introduce ourselves to the room we just joined
       return;
     }
@@ -1075,7 +1394,7 @@ class Portal {
       // (or missed the notice). Drop the seat and re-seek — the host
       // re-admits us with the machinery that already exists.
       if (!this.isHost && !list.some((m) => m.peer === this.peerId)) {
-        this.unseat("the host's list no longer has us — re-seating");
+        this.unseat(t("log.reseatList"));
         return;
       }
       this.members = new Map(list.map((m) => [m.peer, m.name]));
@@ -1088,7 +1407,7 @@ class Portal {
       const body = fromUtf8(this.room.open(env.Rotate.frame, KIND.rotate));
       this.room.applyRotation(JSON.parse(body));
       this.lastHostContact = Date.now();
-      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: "· warped to universe " + this.room.epoch + " — the word now starts a fresh room", out: false });
+      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: t("nar.warped", { e: this.room.epoch }), out: false });
       return;
     }
     if ("Join" in env) {
@@ -1120,14 +1439,14 @@ class Portal {
       // list. Our HOST leaving is a different event entirely: drop the
       // seat and re-seek, so we converge on a takeover in seconds.
       if (!this.isHost && from === this.hostId) {
-        this.unseat("the host left — finding the room again");
+        this.unseat(t("log.reseatLeft"));
         return;
       }
       const name = this.members.get(from) ?? from.slice(0, 10);
       this.members.delete(from);
       this.lastSeen.delete(from);
       this.capable.delete(from);
-      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${name} left`, out: false });
+      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: t("nar.left", { n: name }), out: false });
       if (this.isHost) void this.broadcastMembers();
       return;
     }
@@ -1135,7 +1454,7 @@ class Portal {
       // The host pruned us for silence: drop the seat and re-seek — the
       // retry loop re-admits us through the normal Join path.
       if (env.Error.message === "seat-expired" && !this.isHost && from === this.hostId) {
-        this.unseat("the host dropped our seat for silence — rejoining");
+        this.unseat(t("log.reseatSilent"));
         return;
       }
       // A peer could not open a DM frame (they lost the key to a refresh):
@@ -1189,8 +1508,8 @@ class Portal {
     // forever). Older clients omit the flag and are never pruned.
     if (j.beats === true) this.capable.add(from);
     if (isNew) {
-      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: `· ${j.name || from.slice(0, 10)} joined`, out: false });
-      this.logConn(`seated ${j.name || from.slice(0, 8)}… — key sent`, "ok");
+      this.msgs.push({ ts: Date.now(), sender: "", name: "", body: t("nar.joined", { n: j.name || from.slice(0, 10) }), out: false });
+      this.logConn(t("log.seatedJoin", { n: j.name || from.slice(0, 8) }), "ok");
     }
     const kd: Envelope = {
       KeyDelivery: {
@@ -1267,7 +1586,7 @@ class Portal {
       this.members.delete(p);
       this.lastSeen.delete(p);
       this.capable.delete(p);
-      this.msgs.push({ ts: now, sender: "", name: "", body: `· ${name} drifted off`, out: false });
+      this.msgs.push({ ts: now, sender: "", name: "", body: t("nar.drifted", { n: name }), out: false });
       batch.push({ to: p, env: { Error: { message: "seat-expired" } } });
     }
     if (this.successor) {
@@ -1301,7 +1620,7 @@ class Portal {
   unseat(logText: string) {
     this.room = null;
     this.lastJoinMailAt = 0;
-    setStatus("rejoining the room…");
+    setStatus(t("st.rejoin"));
     this.logConn(logText, "warn");
   }
 
@@ -1350,7 +1669,7 @@ class Portal {
         ? this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(JSON.stringify({ ohfile: { d: file.d, n: file.n, m: file.m, s: file.s }, t: body })), true)
         : this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(text));
     if (!mailFits({ Chat: { frame } })) {
-      toast("this attachment didn't fit the mail limit — nothing was sent");
+      toast(t("toast.mailCap"));
       return;
     }
     this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, q: this.mySeq, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
@@ -1516,7 +1835,7 @@ class Portal {
         ? dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(JSON.stringify({ ohfile: { d: file.d, n: file.n, m: file.m, s: file.s }, t: body })), true)
         : dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(text));
     if (!mailFits({ Chat: { frame } })) {
-      toast("this attachment didn't fit the mail limit — nothing was sent");
+      toast(t("toast.mailCap"));
       return;
     }
     // Count the send only now: the split-brain adoption rule keys off
@@ -1607,7 +1926,7 @@ class Portal {
       mySeq: Date.now(), seenSeq: 0, sent: 0, unconfirmed: false,
       msgs: have?.msgs ?? [], unread: have?.unread ?? 0,
     });
-    this.logConn(`private chat with ${name} opened`, "ok");
+    this.logConn(t("log.dmOpened", { n: name }), "ok");
   }
 }
 
@@ -1695,7 +2014,7 @@ const roomName = () => portal.word;
 /** Newest-last slice of the connection log, shown while we hold no seat. */
 function connLogHtml(rows = 4): string {
   const slice = portal.events.slice(-rows);
-  if (!slice.length) return `<div class="cl-row"><span class="cl-ts">${fmt(Date.now())}</span>contacting the site…</div>`;
+  if (!slice.length) return `<div class="cl-row"><span class="cl-ts">${fmt(Date.now())}</span>${esc(t("log.contact"))}</div>`;
   return slice.map((e) => `<div class="cl-row ${e.kind}"><span class="cl-ts">${fmt(e.ts)}</span>${esc(e.text)}</div>`).join("");
 }
 
@@ -1707,7 +2026,7 @@ const inviteUrl = () =>
   `${location.origin}/join#room=${encodeURIComponent(portal.word)}`;
 
 const inviteText = () =>
-  `Join me in a room on OnlyHumans — open this link, type any name, press Enter: ${inviteUrl()}`;
+  t("invite.text", { u: inviteUrl() });
 
 async function copyInvite() {
   const t = inviteText();
@@ -1718,7 +2037,7 @@ async function copyInvite() {
     ta.value = t; document.body.appendChild(ta); ta.select();
     document.execCommand("copy"); ta.remove();
   }
-  toast("Invite link copied — the room word is already inside it");
+  toast(t("toast.invite"));
 }
 
 /// A word arriving via an invite link, read once at boot; it outranks the
@@ -1812,14 +2131,14 @@ document.addEventListener("click", (e) => {
 /** One message row — narration lines (empty sender) render centered. */
 function msgHtml(m: Msg): string {
   if (!m.sender) return `<div class="narration">${esc(m.body.replace(/^·\s*/, ""))}</div>`;
-  const meta = `<div class="meta">${fmt(m.ts)} · <span class="viasite" title="travelled end-to-end sealed through the site's mailbox">⇄ site</span></div>`;
+  const meta = `<div class="meta">${fmt(m.ts)} · <span class="viasite" title="${esc(t("msg.viaTitle"))}">⇄ site</span></div>`;
   const img = m.img
-    ? `<img class="msgimg" src="${m.img.src}" style="aspect-ratio:${m.img.w} / ${m.img.h}" alt="shared image" loading="lazy">`
+    ? `<img class="msgimg" src="${m.img.src}" style="aspect-ratio:${m.img.w} / ${m.img.h}" alt="${esc(t("msg.imgAlt"))}" loading="lazy">`
     : "";
   // Bytes stay off the DOM — the chip carries only the lookup id; the
   // blob URL is minted inside the click (see the p-msgs click handler).
   const file = m.file
-    ? `<button class="msgfile" type="button" data-fid="${m.file.id}" title="download — sealed end-to-end, decoded on your device"><span class="mf-icon">${FILEICON}</span><span class="mf-body"><span class="mf-name">${esc(m.file.n)}</span><span class="mf-meta">${m.file.s < 1024 ? `${m.file.s} B` : `${(m.file.s / 1024).toFixed(1)} KB`} · ${ACTIVE_TYPES.has(m.file.m) ? "web page file — careful" : "download"}</span></span></button>`
+    ? `<button class="msgfile" type="button" data-fid="${m.file.id}" title="${esc(t("msg.fileTitle"))}"><span class="mf-icon">${FILEICON}</span><span class="mf-body"><span class="mf-name">${esc(m.file.n)}</span><span class="mf-meta">${m.file.s < 1024 ? `${m.file.s} B` : `${(m.file.s / 1024).toFixed(1)} KB`} · ${ACTIVE_TYPES.has(m.file.m) ? esc(t("msg.webFile")) : esc(t("msg.download"))}</span></span></button>`
     : "";
   const cap = m.body ? esc(m.body) : "";
   const cls = m.img || m.file ? `msg hasimg${m.file ? " hasfile" : ""}` : "msg";
@@ -1830,9 +2149,9 @@ function msgHtml(m: Msg): string {
   const myId = portal.peerId;
   const chips = m.re?.size
     ? `<div class="reactions">${[...m.re.entries()].map(([e, set]) =>
-        `<button type="button" class="react${set.has(myId) ? " mine" : ""}" data-e="${esc(e)}" title="${esc([...set].map((p) => (p === myId ? "you" : portal.displayName(p))).join(", "))}">${esc(e)}<span class="re-n">${set.size}</span></button>`).join("")}</div>`
+        `<button type="button" class="react${set.has(myId) ? " mine" : ""}" data-e="${esc(e)}" title="${esc([...set].map((p) => (p === myId ? t("msg.you") : portal.displayName(p))).join(", "))}">${esc(e)}<span class="re-n">${set.size}</span></button>`).join("")}</div>`
     : "";
-  const rbtn = `<button type="button" class="reactbtn" title="react to this message" aria-label="add a reaction">☺</button>`;
+  const rbtn = `<button type="button" class="reactbtn" title="${esc(t("msg.reactTitle"))}" aria-label="${esc(t("msg.reactAria"))}">☺</button>`;
   const dat = `data-s="${esc(m.sender)}" data-q="${esc(String(m.q ?? 0))}"`;
   if (m.out) return `<div class="${cls} out" ${dat}>${cap}${img}${file}${meta}${chips}${rbtn}</div>`;
   const hue = peerHue(m.sender);
@@ -1842,11 +2161,12 @@ function msgHtml(m: Msg): string {
 }
 
 /// Unread DMs surface in the tab title — the only channel that signals
-/// while another conversation (or another tab) is in front.
-const BASE_TITLE = document.title;
+/// while another conversation (or another tab) is in front. The base is
+/// language-aware (a mid-session switch re-titles the tab).
 function syncTitle() {
   const n = [...portal.dms.values()].reduce((s, d) => s + d.unread, 0);
-  document.title = n ? `(${n}) ${BASE_TITLE}` : BASE_TITLE;
+  const base = t("doc.title");
+  document.title = n ? `(${n}) ${base}` : base;
 }
 
 // ---------------------------------------------------- remembered identity
@@ -1890,29 +2210,31 @@ function render() {
     root.innerHTML = `
       <div class="gate">
         <div class="gate-inner">
-          <p class="gate-top">Private Chat Rooms</p>
+          <p class="gate-top">${esc(t("gate.top"))}</p>
           <img class="gate-logo" src="/icon-256.png" alt="">
-          <h2>Every Word is a Key</h2>
+          <h2>${esc(t("gate.slogan"))}</h2>
           <div class="gaterow">
-            <input id="p-name" placeholder="your name…" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(rem.on ? rem.name : "")}">
+            <input id="p-name" placeholder="${esc(t("gate.namePh"))}" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(rem.on ? rem.name : "")}">
           </div>
           <div class="gaterow">
-            <input id="p-word" placeholder="room word" maxlength="64" autocomplete="off" spellcheck="false" list="p-rooms" value="${esc(invitedWord || (rem.on ? rem.last : ""))}">
-            <button id="p-join" class="primary" type="button">Enter the room</button>
+            <input id="p-word" placeholder="${esc(t("gate.wordPh"))}" maxlength="64" autocomplete="off" spellcheck="false" list="p-rooms" value="${esc(invitedWord || (rem.on ? rem.last : ""))}">
+            <button id="p-join" class="primary" type="button">${esc(t("gate.enter"))}</button>
           </div>
           <datalist id="p-rooms">${rem.rooms.map((w) => `<option value="${esc(w)}"></option>`).join("")}</datalist>
-          <label class="gaterem" title="saves your name and your recently used room words in this browser — nothing else, and unchecking removes it">
+          <label class="gaterem" title="${esc(t("gate.rememberTitle"))}">
             <input type="checkbox" id="p-remember" ${rem.on ? "checked" : ""}>
-            <span>remember my name and rooms on this device</span>
+            <span>${esc(t("gate.remember"))}</span>
           </label>
           <p class="gatehint" id="p-err"></p>
-          <p class="gatebuild">browser portal · build ${BUILD}</p>
+          <p class="gatebuild">${esc(t("gate.build", { b: BUILD }))}</p>
+          <button id="p-lang" class="gatelang" type="button">${LANG === "zh" ? "English" : "简体中文"}</button>
         </div>
       </div>`;
     const word = $("p-word") as HTMLInputElement;
     $("p-join")?.addEventListener("click", () => void doJoin());
     ($("p-name") as HTMLInputElement).addEventListener("keydown", (e) => { if (e.key === "Enter") void doJoin(); });
     word.addEventListener("keydown", (e) => { if (e.key === "Enter") void doJoin(); });
+    $("p-lang")?.addEventListener("click", () => setLang(LANG === "zh" ? "en" : "zh"));
     return;
   }
   // chat view — the desktop app's three-part shell
@@ -1947,27 +2269,27 @@ function render() {
       <img class="brandlogo" src="/icon-256.png" alt="">
       <span class="logo">OnlyHumans</span>
       <span class="roomchip" id="p-roomchip" role="button" tabindex="0" aria-haspopup="menu"
-            title="switch between the room and your private chats">
+            title="${esc(t("cmd.switchRoom"))}">
         <span class="rs-glyph">${activeDm ? "⇄" : isEarth() ? "⌂" : "◆"}</span>
         <span class="rs-label">${activeDm ? esc(dmName(activeDm.peer)) : esc(roomName())}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </span>
-      <button id="p-editprofile" class="profilebtn" title="edit my profile — photo, name, bio, this room's picture" aria-label="edit my profile">✎<span class="pb-label">Edit my profile</span></button>
-      <button id="p-idmenu" class="idmenu" title="your profile" aria-haspopup="menu">
-        ${avatarHtml(myId, portal.name || "you", photoOf(myId))}
+      <button id="p-editprofile" class="profilebtn" title="${esc(t("cmd.editProfileTitle"))}" aria-label="${esc(t("cmd.editProfile"))}">✎<span class="pb-label">${esc(t("cmd.editProfile"))}</span></button>
+      <button id="p-idmenu" class="idmenu" title="${esc(t("cmd.yourProfile"))}" aria-haspopup="menu">
+        ${avatarHtml(myId, portal.name || t("side.you2"), photoOf(myId))}
         <span class="idname">${esc(portal.name)}</span>
         <span class="caret" aria-hidden="true">▾</span>
       </button>
     </header>
     <main>
       <div class="sidebar">
-        <div class="side-label">people in the room</div>
+        <div class="side-label">${esc(t("side.people"))}</div>
         <ul class="member-list">
-          <li title="this is you">
+          <li title="${esc(t("side.you"))}">
             ${avatarHtml(myId, portal.name, photoOf(myId))}
             <div class="li-body">
-              <span class="mname">${esc(portal.name)} (you)</span>
-              <span class="li-sub" title="${esc(portal.bio)}">${esc(portal.bio || "you")}</span>
+              <span class="mname">${esc(portal.name)}${esc(t("side.youTag"))}</span>
+              <span class="li-sub" title="${esc(portal.bio)}">${esc(portal.bio || t("side.you2"))}</span>
             </div>
           </li>
           ${others.map(([peer]) => `
@@ -1975,22 +2297,22 @@ function render() {
             ${avatarHtml(peer, dmName(peer), photoOf(peer))}
             <div class="li-body">
               <span class="mname">${esc(dmName(peer))}</span>
-              <span class="li-sub">${esc(bioOf(peer) || "via site")}</span>
+              <span class="li-sub">${esc(bioOf(peer) || t("side.viaSite"))}</span>
             </div>
-            <button class="dm-btn" data-peer="${esc(peer)}" title="private chat with ${esc(dmName(peer))}" aria-label="private chat with ${esc(dmName(peer))}">⇄ message</button>
+            <button class="dm-btn" data-peer="${esc(peer)}" title="${esc(t("side.dmTitle", { n: dmName(peer) }))}" aria-label="${esc(t("side.dmTitle", { n: dmName(peer) }))}">${esc(t("side.dm"))}</button>
           </li>`).join("")}
         </ul>
         ${portal.dms.size ? `
-        <div class="side-label">private chats</div>
+        <div class="side-label">${esc(t("side.dms"))}</div>
         <ul class="member-list dm-list">
           ${[...portal.dms.entries()].map(([hex, dm]) => `
           <li data-dm="${esc(hex)}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${esc(dmName(dm.peer))}">
             ${avatarHtml(dm.peer, dmName(dm.peer), photoOf(dm.peer))}
             <div class="li-body">
               <span class="mname">${esc(dmName(dm.peer))}</span>
-              <span class="li-sub">${dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two"}</span>
+              <span class="li-sub">${dm.unread ? esc(t("side.unread", { n: dm.unread })) : dm.unconfirmed ? esc(t("side.invited")) : esc(t("side.justTwo"))}</span>
             </div>
-            ${dm.unread ? `<span class="unread-dot" title="${dm.unread} unread"></span>` : ""}
+            ${dm.unread ? `<span class="unread-dot" title="${esc(t("side.unread", { n: dm.unread }))}"></span>` : ""}
           </li>`).join("")}
         </ul>` : ""}
       </div>
@@ -2002,11 +2324,11 @@ function render() {
             return `
             ${avatarHtml(activeDm.peer, n, photoOf(activeDm.peer))}
             <div class="tb-body">
-              <div class="tb-title">${esc(n)} <span class="pp-pill">private</span></div>
-              <div class="tb-sub">vanishes when you both leave · sealed with a key only you two hold</div>
+              <div class="tb-title">${esc(n)} <span class="pp-pill">${esc(t("tb.private"))}</span></div>
+              <div class="tb-sub">${esc(t("tb.dmSub"))}</div>
             </div>
             <div class="tb-actions">
-              <button id="p-back" class="btn-ghost" title="back to the room (Esc)">‹ room</button>
+              <button id="p-back" class="btn-ghost" title="${esc(t("tb.back"))}">${esc(t("tb.backBtn"))}</button>
             </div>`;
           })() : `
           ${roomAvatarHtml()}
@@ -2014,51 +2336,47 @@ function render() {
             <div class="tb-title">${esc(roomName())}</div>
           </div>
           <div class="tb-actions">
-            <button id="p-members" class="btn-ghost members-btn" title="people in this room">${memberCount} in room</button>
-            ${portal.isHost ? `<button id="p-warp" class="btn-ghost" title="move everyone here into a new universe — the word will start a fresh room for whoever types it next">✦ Warp</button>` : ""}
-            <button id="p-invite" class="btn-ghost" title="copy a link that opens this room — the word is already in it">＋ Invite</button>
+            <button id="p-members" class="btn-ghost members-btn" title="${esc(t("tb.peopleTitle"))}">${esc(t("tb.inRoom", { n: memberCount }))}</button>
+            ${portal.isHost ? `<button id="p-warp" class="btn-ghost" title="${esc(t("tb.warpTitle"))}">${esc(t("tb.warp"))}</button>` : ""}
+            <button id="p-invite" class="btn-ghost" title="${esc(t("tb.inviteTitle"))}">${esc(t("tb.invite"))}</button>
           </div>`}
         </div>
         <div class="messages" id="p-msgs">
           ${!activeDm && portal.msgs.length === 0 ? `<div class="chat-hint">${isEarth()
-            ? (others.length === 0
-              ? `You're in Earth — everyone who uses this word joins this room. Say hi, or <button id="p-invite-empty" class="linklike">invite a friend</button>.`
-              : "You're in Earth — everyone who uses this word joins this room. Say hi.")
-            : (others.length === 0
-              ? `Nobody else has used this word yet — they land here the moment they type the same one. <button id="p-invite-empty" class="linklike">Invite someone</button>`
-              : "You're in — only people who typed this room's word can be here.")}</div>` : ""}
-          ${activeDm && activeDm.msgs.length === 0 ? `<div class="chat-hint">This is a sealed two-person room — only you and ${esc(dmName(activeDm.peer))} hold this key.</div>` : ""}
+            ? (others.length === 0 ? t("hint.earthAlone") : t("hint.earthOthers"))
+            : (others.length === 0 ? t("hint.wordAlone") : t("hint.wordOthers"))}</div>` : ""}
+          ${activeDm && activeDm.msgs.length === 0 ? `<div class="chat-hint">${t("hint.dm", { n: esc(dmName(activeDm.peer)) })}</div>` : ""}
           ${(activeDm ? activeDm.msgs : portal.msgs).map(msgHtml).join("")}
         </div>
         ${(() => {
           if (!pendingImg && !pendingFile && convertingWhat !== "chat") return "";
           if (convertingWhat === "chat" || (!pendingImg && !pendingFile)) return `
         <div class="imgqueue">
-          <span class="spin"></span><span class="iq-meta">${convertingKind === "file" ? "reading the file…" : "shrinking the image to 30 KB…"}</span>
+          <span class="spin"></span><span class="iq-meta">${esc(convertingKind === "file" ? t("iq.readingFile") : t("iq.shrinking"))}</span>
         </div>`;
           const pi = pendingImg, pf = pendingFile;
           return `
         <div class="imgqueue">
           ${pi ? `
             <img class="iq-thumb" src="${pi.src}" alt="">
-            <span class="iq-meta">${(pi.bytes / 1024).toFixed(1)} KB · ${pi.w}×${pi.h} · ready — Enter sends</span>
-            <button id="p-imgx" class="iq-x" type="button" title="remove the image" aria-label="remove the image">✕</button>` : `
+            <span class="iq-meta">${(pi.bytes / 1024).toFixed(1)} KB · ${pi.w}×${pi.h} · ${esc(t("iq.ready"))}</span>
+            <button id="p-imgx" class="iq-x" type="button" title="${esc(t("iq.removeImg"))}" aria-label="${esc(t("iq.removeImg"))}">✕</button>` : `
             <span class="iq-ficon">${FILEICON}</span>
-            <span class="iq-meta">${esc(pf!.n)} · ${pf!.s < 1024 ? `${pf!.s} B` : `${(pf!.s / 1024).toFixed(1)} KB`} · sent as-is${pf!.m.startsWith("image/") ? " — metadata kept" : ""} — Enter sends</span>
-            <button id="p-filex" class="iq-x" type="button" title="remove the file" aria-label="remove the file">✕</button>`}
+            <span class="iq-meta">${esc(pf!.n)} · ${pf!.s < 1024 ? `${pf!.s} B` : `${(pf!.s / 1024).toFixed(1)} KB`} · ${esc(t("iq.sentAsIs"))}${pf!.m.startsWith("image/") ? ` — ${esc(t("iq.metaKept"))}` : ""} — ${esc(t("iq.enterSends"))}</span>
+            <button id="p-filex" class="iq-x" type="button" title="${esc(t("iq.removeFile"))}" aria-label="${esc(t("iq.removeFile"))}">✕</button>`}
         </div>`;
         })()}
         <div class="composer">
-          <button id="p-emoji" class="attach" type="button" title="insert an emoji" aria-label="insert an emoji">☺</button>
-          <button id="p-attach" class="attach" type="button" title="attach a picture or a file — pictures are re-encoded on your device to 30 KB or less (EXIF stripped); files up to 30 KB travel as-is" aria-label="attach a picture or file">${PAPERCLIP}</button>
-          <textarea id="p-send" rows="1" placeholder="${pendingImg || pendingFile ? "caption (optional)…" : activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
-          <button id="p-sendbtn" class="primary" type="button">Send</button>
+          <button id="p-emoji" class="attach" type="button" title="${esc(t("cp.emojiTitle"))}" aria-label="${esc(t("cp.emojiTitle"))}">☺</button>
+          <button id="p-attach" class="attach" type="button" title="${esc(t("cp.attachTitle"))}" aria-label="${esc(t("cp.attachAria"))}">${PAPERCLIP}</button>
+          <textarea id="p-send" rows="1" placeholder="${pendingImg || pendingFile ? esc(t("cp.caption")) : activeDm ? esc(t("cp.dmPh")) : esc(t("cp.roomPh"))}" title="${esc(t("cp.sendTitle"))}" autocomplete="off"></textarea>
+          <button id="p-sendbtn" class="primary" type="button">${esc(t("cp.send"))}</button>
         </div>
       </div>` : `
       <div class="empty">
-        <div class="join-progress"><span class="spin"></span><span>${esc(portal.status || "finding the room…")}</span></div>
+        <div class="join-progress"><span class="spin"></span><span>${esc(portal.status || t("st.finding"))}</span></div>
         <div class="connlog">${connLogHtml()}</div>
-        <p class="connhint">Keep this tab open — the other side lands here the moment it uses the same word. Phones pause a tab when the screen locks; picking the phone back up reconnects it instantly.</p>
+        <p class="connhint">${esc(t("hint.keepOpen"))}</p>
       </div>`}
     </main>`;
 
@@ -2069,34 +2387,34 @@ function render() {
     const roomPhoto = roomDraft?.src ?? (roomRemoved ? "" : portal.roomImg.img);
     root.insertAdjacentHTML("beforeend", `
       <div class="sheetwrap" id="pf-wrap">
-        <div class="sheet" role="dialog" aria-label="edit my profile">
-          <div class="sheet-title">Your profile</div>
+        <div class="sheet" role="dialog" aria-label="${esc(t("pf.sheetAria"))}">
+          <div class="sheet-title">${esc(t("pf.title"))}</div>
           <div class="pf-photo">
-            ${avatarHtml(portal.peerId || "", portal.name || "you", ownPhoto)}
+            ${avatarHtml(portal.peerId || "", portal.name || t("side.you2"), ownPhoto)}
             <div class="pf-photo-btns">
-              <button id="pf-photo" type="button">Photo…</button>
-              ${ownPhoto ? `<button id="pf-photo-x" type="button" class="linklike">remove</button>` : ""}
+              <button id="pf-photo" type="button">${esc(t("pf.photo"))}</button>
+              ${ownPhoto ? `<button id="pf-photo-x" type="button" class="linklike">${esc(t("pf.remove"))}</button>` : ""}
               ${convertingWhat === "avatar" ? `<span class="spin"></span>` : ""}
             </div>
           </div>
-          <label class="pf-label" for="pf-name">name</label>
+          <label class="pf-label" for="pf-name">${esc(t("pf.name"))}</label>
           <input id="pf-name" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(sheetState?.name ?? portal.name)}">
-          <label class="pf-label" for="pf-bio">bio</label>
-          <textarea id="pf-bio" maxlength="120" rows="2" placeholder="a line about you — shown to people in the room"></textarea>
-          <div class="sheet-title">This room's picture</div>
+          <label class="pf-label" for="pf-bio">${esc(t("pf.bio"))}</label>
+          <textarea id="pf-bio" maxlength="120" rows="2" placeholder="${esc(t("pf.bioPh"))}"></textarea>
+          <div class="sheet-title">${esc(t("pf.roomTitle"))}</div>
           <div class="pf-photo">
             ${roomPhoto ? `<span class="avatar roomavatar"><img src="${roomPhoto}" alt=""></span>` : MAIN_ROOM_ICON}
             <div class="pf-photo-btns">
-              <button id="pf-room" type="button">Picture…</button>
-              ${roomPhoto ? `<button id="pf-room-x" type="button" class="linklike">remove</button>` : ""}
+              <button id="pf-room" type="button">${esc(t("pf.picture"))}</button>
+              ${roomPhoto ? `<button id="pf-room-x" type="button" class="linklike">${esc(t("pf.remove"))}</button>` : ""}
               ${convertingWhat === "room" ? `<span class="spin"></span>` : ""}
             </div>
           </div>
           <div class="pf-actions">
-            <button id="pf-cancel" type="button">Cancel</button>
-            <button id="pf-save" class="primary" type="button">Save</button>
+            <button id="pf-cancel" type="button">${esc(t("pf.cancel"))}</button>
+            <button id="pf-save" class="primary" type="button">${esc(t("pf.save"))}</button>
           </div>
-          <p class="pf-note">Everything here is session-only — it travels sealed to people in the room and vanishes when the tab closes. Nothing is stored anywhere.</p>
+          <p class="pf-note">${esc(t("pf.note"))}</p>
         </div>
       </div>`);
     const bioEl = $("pf-bio") as HTMLTextAreaElement | null;
@@ -2111,10 +2429,10 @@ function render() {
     const el = e.currentTarget as HTMLElement;
     if (document.getElementById("open-menu")) { closeMenus(); return; }
     openMenu(el, [
-      { label: `${portal.name} · portal build ${BUILD}`, header: true },
+      { label: t("menu.buildHeader", { n: portal.name, b: BUILD }), header: true },
       {
-        label: "Log off",
-        hint: "back to the join screen — your key stays in this browser",
+        label: t("menu.logoff"),
+        hint: t("menu.logoffHint"),
         act: () => {
           portal.leaveRoom(true);
           portal.dms.clear();
@@ -2126,7 +2444,12 @@ function render() {
           if (n) n.value = portal.name;
         },
       },
-      { label: `${BROWSER} · Enter sends, Shift+Enter newline`, header: true },
+      {
+        label: t("menu.lang"),
+        hint: LANG === "zh" ? t("menu.langHintZh") : t("menu.langHintEn"),
+        act: () => setLang(LANG === "zh" ? "en" : "zh"),
+      },
+      { label: t("menu.browserLine", { b: BROWSER }), header: true },
     ]);
   });
   // The profile sheet got its own always-visible button (user ask: more
@@ -2150,13 +2473,13 @@ function render() {
     if (document.getElementById("open-menu")) { closeMenus(); return; }
     const next = (portal.room?.epoch ?? 1) + 1;
     openMenu(el, [
-      { label: `warp to universe ${next}?`, header: true },
+      { label: t("menu.warpQ", { n: next }), header: true },
       {
-        label: "✦ Warp",
-        hint: "everyone here moves to a new key; the word founds a fresh room for newcomers",
+        label: t("menu.warpGo"),
+        hint: t("menu.warpHint"),
         act: () => void portal.warp(),
       },
-      { label: "stay here", hint: `universe ${portal.room?.epoch ?? 1} keeps going`, act: () => {} },
+      { label: t("menu.stay"), hint: t("menu.stayHint", { n: portal.room?.epoch ?? 1 }), act: () => {} },
     ]);
   });
 
@@ -2206,7 +2529,7 @@ function render() {
     const bioEl = $("pf-bio") as HTMLTextAreaElement | null;
     const name = (nameEl?.value ?? "").trim().slice(0, 32);
     const bio = (bioEl?.value ?? "").trim().slice(0, 120);
-    if (!name) { toast("A name is required."); return; }
+    if (!name) { toast(t("gate.errName")); return; }
     portal.name = name;
     portal.bio = bio;
     if (avatarDraft) portal.photo = avatarDraft.src;
@@ -2231,7 +2554,7 @@ function render() {
   const chipSwitch = (el: HTMLElement) => {
     if (document.getElementById("open-menu")) { closeMenus(); return; }
     const items: MenuItem[] = [
-      { label: "switch conversation", header: true },
+      { label: t("menu.switch"), header: true },
       {
         label: roomName(),
         icon: roomAvatarHtml(),
@@ -2242,7 +2565,7 @@ function render() {
       const n = dmName(dm.peer);
       items.push({
         label: n,
-        hint: dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two",
+        hint: dm.unread ? t("side.unread", { n: dm.unread }) : dm.unconfirmed ? t("side.invited") : t("side.justTwo"),
         icon: avatarHtml(dm.peer, n, photoOf(dm.peer)),
         act: () => { dm.unread = 0; activeRoom = hex; render(); },
       });
@@ -2261,17 +2584,17 @@ function render() {
     const el = e.currentTarget as HTMLElement;
     if (document.getElementById("open-menu")) { closeMenus(); return; }
     const items: MenuItem[] = [
-      { label: `people in the room · ${roomName()}`, header: true },
+      { label: t("menu.peopleRoom", { w: roomName() }), header: true },
       ...[...portal.members].map(([peer, name]): MenuItem => ({
-        label: peer === myId ? `${portal.displayName(peer)} (you)` : portal.displayName(peer),
+        label: peer === myId ? `${portal.displayName(peer)}${t("side.youTag")}` : portal.displayName(peer),
         hint: peer === myId
-          ? (portal.bio || (portal.isHost ? "this device — holding the room open" : "this device"))
-          : bioOf(peer) || (peer === portal.hostId ? "holding the room open" : "via site"),
+          ? (portal.bio || (portal.isHost ? t("menu.thisDeviceHost") : t("menu.thisDevice")))
+          : bioOf(peer) || (peer === portal.hostId ? t("menu.holdingOpen") : t("side.viaSite")),
         icon: avatarHtml(peer, name, photoOf(peer)),
       })),
     ];
     if (others.length) {
-      items.push({ label: "start a private chat", header: true });
+      items.push({ label: t("menu.startDm"), header: true });
       for (const [peer, name] of others) {
         items.push({
           label: `⇄ ${portal.displayName(peer)}`,
@@ -2281,18 +2604,18 @@ function render() {
       }
     }
     if (portal.dms.size) {
-      items.push({ label: "private chats", header: true });
+      items.push({ label: t("menu.dms"), header: true });
       for (const [hex, dm] of portal.dms) {
         const n = dmName(dm.peer);
         items.push({
           label: n,
-          hint: dm.unread ? `${dm.unread} unread` : dm.unconfirmed ? "invited" : "just you two",
+          hint: dm.unread ? t("side.unread", { n: dm.unread }) : dm.unconfirmed ? t("side.invited") : t("side.justTwo"),
           icon: avatarHtml(dm.peer, n, photoOf(dm.peer)),
           act: () => { dm.unread = 0; activeRoom = hex; render(); },
         });
       }
     }
-    items.push({ label: `${portal.word} · universe ${portal.room?.epoch ?? 1}`, header: true });
+    items.push({ label: t("menu.roomEpoch", { w: portal.word, e: portal.room?.epoch ?? 1 }), header: true });
     openMenu(el, items);
   });
 
@@ -2465,7 +2788,7 @@ async function doJoin() {
   const name = ($("p-name") as HTMLInputElement).value.trim();
   const word = ($("p-word") as HTMLInputElement).value.trim() || "earth";
   const err = $("p-err")!;
-  if (!name) { err.textContent = "A name is required."; return; }
+    if (!name) { err.textContent = t("gate.errName"); return; }
   err.textContent = "";
   saveRemember(($("p-remember") as HTMLInputElement | null)?.checked ?? false, name, word);
   // DM ids and keys bind THIS room's word (egk) — a different room is a

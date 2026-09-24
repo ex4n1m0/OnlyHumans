@@ -18,7 +18,7 @@
 <meta property="og:image:alt" content="OnlyHumans — private chat rooms in any browser. Every word is a key.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://onlyhumans.deepflux.space/og-image.png">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="32px" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/icon-256.png">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"WebApplication","name":"OnlyHumans",
@@ -41,6 +41,10 @@
     --mid: #fbbf24;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     --serif: Georgia, "Times New Roman", serif;
+    /* CJK serif for the zh slogan accent (宋体/Songti/Noto Serif CJK) —
+       Chinese has no italics, so the em renders upright there */
+    --serif-zh: Georgia, "Source Han Serif SC", "Noto Serif CJK SC",
+                "Songti SC", "SimSun", serif;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
@@ -122,6 +126,35 @@
   /* the dot separator wraps to a line's end and reads as a stray mark */
   @media (max-width: 560px) { .kin-sep { display: none; } }
 
+  /* language dropdown — top-right corner, after the Join button */
+  .lang-menu { position: relative; display: inline-flex; flex: 0 0 auto; }
+  .lang-btn {
+    display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap;
+    min-height: 40px; padding: .35rem .8rem; font: inherit; font-size: .82rem;
+    font-weight: 600; color: var(--ink-soft); cursor: pointer;
+    background: transparent; border: 1px solid var(--line); border-radius: 999px;
+  }
+  .lang-btn:hover, .lang-btn[aria-expanded="true"] { color: var(--ink); border-color: var(--accent); }
+  .lang-btn .caret { font-size: .6rem; color: var(--muted); }
+  .lang-list {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+    min-width: 148px; padding: 4px;
+    background: #0b0f16; border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .lang-list[hidden] { display: none; }
+  .lang-list button {
+    display: flex; align-items: center; gap: .5rem; text-align: left;
+    padding: .5rem .7rem; font: inherit; font-size: .88rem;
+    color: var(--ink-soft); background: transparent; border: 0;
+    border-radius: 7px; cursor: pointer;
+  }
+  .lang-list button:hover { background: rgba(236, 233, 226, .06); color: var(--ink); }
+  .lang-list button[aria-checked="true"] { color: var(--accent); }
+  .lang-list button[aria-checked="true"]::before { content: "✓"; font-size: .75rem; }
+  .lang-list button:not([aria-checked="true"])::before { content: "✓"; visibility: hidden; }
+
   /* hero — logo on top, centered */
   .hero {
     min-height: calc(100svh - 4.2rem);
@@ -146,6 +179,9 @@
   }
   .hero h1 em { font-family: var(--serif); font-style: italic; font-weight: 500;
                 color: var(--accent); letter-spacing: 0; }
+  /* Chinese has no italic — the em accent goes upright serif (宋体 family),
+     keeping the two-tone serif contrast of the English slogan */
+  html[lang="zh-CN"] .hero h1 em { font-family: var(--serif-zh); font-style: normal; }
   .hero p.lede { color: var(--ink-soft); max-width: 36rem; font-size: clamp(1rem, .95rem + .25vw, 1.2rem); }
   .hero .cta { margin-top: 2rem; font-size: 1.05rem; }
   .hero .anywhere { margin-top: .9rem; color: var(--muted); font-size: .85rem; }
@@ -202,14 +238,14 @@
 </style>
 </head>
 <body>
-<a class="skip-link" href="#how-it-works">Skip to content</a>
+<a class="skip-link" href="#how-it-works" data-i18n="skip">Skip to content</a>
 
 <div class="kin">
   <div class="kin-row">
-    <span class="kin-label">From the same maker</span>
-    <a class="kin-link" href="https://deepflux.space/" target="_blank" rel="noopener"><b>DeepFlux</b> &mdash; the AI-native media &amp; download suite</a>
+    <span class="kin-label" data-i18n="kin.label">From the same maker</span>
+    <a class="kin-link" href="https://deepflux.space/" target="_blank" rel="noopener" data-i18n-html="kin.1"><b>DeepFlux</b> &mdash; the AI-native media &amp; download suite</a>
     <span class="kin-sep" aria-hidden="true"></span>
-    <a class="kin-link" href="https://n38worth.com/" target="_blank" rel="noopener"><b>n38worth</b> &mdash; the human trading simulation</a>
+    <a class="kin-link" href="https://n38worth.com/" target="_blank" rel="noopener" data-i18n-html="kin.2"><b>n38worth</b> &mdash; the human trading simulation</a>
   </div>
 </div>
 
@@ -220,53 +256,63 @@
       <span class="wordmark">only<b>humans</b></span>
     </a>
     <span class="live-pills">
-      <span class="live-pill" id="rooms-pill" hidden title="Rooms with a live host right now — just a count; the server can't see inside any room.">
+      <span class="live-pill" id="rooms-pill" hidden data-i18n-title="pill.rooms.title" title="Rooms with a live host right now — just a count; the server can't see inside any room.">
         <span aria-hidden="true">◆</span>
-        <span><b id="rooms-count">0</b> <span id="rooms-word">rooms</span> live</span>
+        <span><b id="rooms-count">0</b> <span id="rooms-word">rooms live</span></span>
       </span>
-      <span class="live-pill" id="live-pill" hidden title="Everyone online heartbeats an anonymous session token — no names, no peer ids.">
+      <span class="live-pill" id="live-pill" hidden data-i18n-title="pill.live.title" title="Everyone online heartbeats an anonymous session token — no names, no peer ids.">
         <span class="live-dot" aria-hidden="true"></span>
-        <span><b id="live-count">0</b> <span id="live-word">humans</span> online</span>
+        <span><b id="live-count">0</b> <span id="live-word">humans online</span></span>
       </span>
     </span>
-    <a class="btn btn-primary" href="/join">Join</a>
+    <a class="btn btn-primary" href="/join" data-i18n="nav.join">Join</a>
+    <div class="lang-menu">
+      <button class="lang-btn" id="lang-btn" type="button" aria-haspopup="menu"
+              aria-expanded="false" aria-label="Language / 语言">
+        <span id="lang-cur">EN</span><span class="caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="lang-list" id="lang-list" role="menu" aria-label="Language / 语言" hidden>
+        <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+        <button type="button" role="menuitemradio" data-lang="zh" aria-checked="false">简体中文</button>
+      </div>
+    </div>
   </div>
 </header>
 
 <main>
   <section class="hero" aria-labelledby="hero-h">
-    <p class="hero-top">Private Chat Rooms</p>
+    <p class="hero-top" data-i18n="hero.top">Private Chat Rooms</p>
     <picture>
       <source type="image/webp" srcset="/logo-hero.webp">
       <img class="hero-logo" src="/logo.png" alt="OnlyHumans" width="1254" height="1254" decoding="async" fetchpriority="high">
     </picture>
-    <h1 id="hero-h">Every Word is a <em>Key</em></h1>
-    <p class="lede">A shared word is your key. Choose a word together,
+    <h1 id="hero-h" data-i18n-html="hero.h1">Every Word is a <em>Key</em></h1>
+    <p class="lede" data-i18n="hero.lede">A shared word is your key. Choose a word together,
     then enter it independently. The same word opens the same private
     encrypted room.</p>
-    <a class="btn btn-primary cta" href="/join">Join from your browser</a>
-    <p class="anywhere">Any device — phone, tablet, or desktop.</p>
+    <a class="btn btn-primary cta" href="/join" data-i18n="hero.cta">Join from your browser</a>
+    <p class="anywhere" data-i18n="hero.anywhere">Any device — phone, tablet, or desktop.</p>
   </section>
 
   <section id="how-it-works" aria-labelledby="hiw-h">
-    <h2 class="section" id="hiw-h">How it works</h2>
+    <h2 class="section" id="hiw-h" data-i18n="hiw.h">How it works</h2>
     <div class="steps">
       <div class="step">
         <span class="num">01</span>
-        <h3>Choose a name</h3>
-        <p>Your identity is a key created on your device. No email, no phone
+        <h3 data-i18n="step1.h">Choose a name</h3>
+        <p data-i18n="step1.p">Your identity is a key created on your device. No email, no phone
         number.</p>
       </div>
       <div class="step">
         <span class="num">02</span>
-        <h3>Enter a word</h3>
-        <p>Everyone with the same word lands in the same room. For private
+        <h3 data-i18n="step2.h">Enter a word</h3>
+        <p data-i18n="step2.p">Everyone with the same word lands in the same room. For private
         rooms, share an unguessable word.</p>
       </div>
       <div class="step">
         <span class="num">03</span>
-        <h3>Talk</h3>
-        <p>Messages are sealed end-to-end and travel directly between
+        <h3 data-i18n="step3.h">Talk</h3>
+        <p data-i18n="step3.p">Messages are sealed end-to-end and travel directly between
         members when possible, and sealed through the site's mailbox when
         they can't.</p>
       </div>
@@ -274,32 +320,32 @@
   </section>
 
   <section id="security" aria-labelledby="sec-h">
-    <h2 class="section" id="sec-h">Security in plain terms</h2>
+    <h2 class="section" id="sec-h" data-i18n="sec.h">Security in plain terms</h2>
     <div class="tiers">
       <div class="tier ok">
-        <h3>Protected</h3>
+        <h3 data-i18n="tier1.h">Protected</h3>
         <ul>
-          <li>Message content — encrypted on your device, a key per message</li>
-          <li>Room keys — sealed individually for each member</li>
-          <li>Your identity — a key pair that exists only on your device</li>
+          <li data-i18n="tier1.1">Message content — encrypted on your device, a key per message</li>
+          <li data-i18n="tier1.2">Room keys — sealed individually for each member</li>
+          <li data-i18n="tier1.3">Your identity — a key pair that exists only on your device</li>
         </ul>
       </div>
       <div class="tier meta">
-        <h3>Visible to the server</h3>
+        <h3 data-i18n="tier2.h">Visible to the server</h3>
         <ul>
-          <li>Signed, expiring peer addresses and who hosts which room</li>
-          <li>An anonymous online token, random per session</li>
-          <li>Fallback-mail timing, size, and sender/recipient ids</li>
+          <li data-i18n="tier2.1">Signed, expiring peer addresses and who hosts which room</li>
+          <li data-i18n="tier2.2">An anonymous online token, random per session</li>
+          <li data-i18n="tier2.3">Fallback-mail timing, size, and sender/recipient ids</li>
         </ul>
-        <p class="verdict">The server can never read a word — but it can see
+        <p class="verdict" data-i18n="tier2.verdict">The server can never read a word — but it can see
         this metadata, so we say so.</p>
       </div>
       <div class="tier out">
-        <h3>Honest limits</h3>
+        <h3 data-i18n="tier3.h">Honest limits</h3>
         <ul>
-          <li>A compromised device reads what's on its screen</li>
-          <li>Guessable words aren't safe for private rooms</li>
-          <li>No global traffic-analysis resistance; keys live in browser
+          <li data-i18n="tier3.1">A compromised device reads what's on its screen</li>
+          <li data-i18n="tier3.2">Guessable words aren't safe for private rooms</li>
+          <li data-i18n="tier3.3">No global traffic-analysis resistance; keys live in browser
           storage — mind shared machines</li>
         </ul>
       </div>
@@ -307,47 +353,47 @@
   </section>
 
   <section id="faq" aria-labelledby="faq-h">
-    <h2 class="section" id="faq-h">FAQ</h2>
+    <h2 class="section" id="faq-h" data-i18n="faq.h">FAQ</h2>
     <div class="faq">
       <details name="faq">
-        <summary>Do I need an account?</summary>
-        <p>No. Choose a name and enter a room word. Your device creates a
+        <summary data-i18n="faq1.q">Do I need an account?</summary>
+        <p data-i18n="faq1.a">No. Choose a name and enter a room word. Your device creates a
         local identity key the first time you join.</p>
       </details>
       <details name="faq">
-        <summary>How do rooms work?</summary>
-        <p>Everyone typing the exact same word meets in the same room. For
+        <summary data-i18n="faq2.q">How do rooms work?</summary>
+        <p data-i18n="faq2.a">Everyone typing the exact same word meets in the same room. For
         private conversations, share an unguessable word — only
         people who know it can find you.</p>
       </details>
       <details name="faq">
-        <summary>Where do my messages live?</summary>
-        <p>In your browser session, encrypted — close the tab and the
+        <summary data-i18n="faq3.q">Where do my messages live?</summary>
+        <p data-i18n="faq3.a">In your browser session, encrypted — close the tab and the
         transcript is gone. The site never sees or stores a single word.</p>
       </details>
       <details name="faq">
-        <summary>Someone was offline. Is my message lost?</summary>
-        <p>No — it waits, sealed, in the site's fallback mailbox and arrives
+        <summary data-i18n="faq4.q">Someone was offline. Is my message lost?</summary>
+        <p data-i18n="faq4.a">No — it waits, sealed, in the site's fallback mailbox and arrives
         when they're back, usually within a minute or two.</p>
       </details>
       <details name="faq">
-        <summary>Does it work on phones?</summary>
-        <p>Yes — open <a href="/join">/join</a> in any browser, nothing to
+        <summary data-i18n="faq5.q">Does it work on phones?</summary>
+        <p data-i18n-html="faq5.a">Yes — open <a href="/join">/join</a> in any browser, nothing to
         install.</p>
       </details>
     </div>
   </section>
 
   <section id="crypto" aria-labelledby="crypto-h">
-    <h2 class="section" id="crypto-h">The encryption, technically</h2>
+    <h2 class="section" id="crypto-h" data-i18n="crypto.h">The encryption, technically</h2>
     <div class="crypto">
-      <p><strong>The primitives.</strong> Everything is one AEAD cipher —
+      <p data-i18n-html="crypto.p1"><strong>The primitives.</strong> Everything is one AEAD cipher —
       XChaCha20-Poly1305 — with keys derived through HKDF-SHA256, identities
       as Ed25519 keypairs, and the word stretched through Argon2id at
       64&nbsp;MiB / t=3 / 1 thread. Every sealed frame carries AAD binding
       its context (kind, room, epoch, sender, seq), so a ciphertext can't be
       replayed into another room, generation, or slot — the tag fails.</p>
-      <p><strong>The key stack, bottom to top.</strong> (1) The word is
+      <p data-i18n-html="crypto.p2"><strong>The key stack, bottom to top.</strong> (1) The word is
       stretched with Argon2id into an "effective GK" (the GK is the public
       per-release universe key — it opens no room by itself); the room id is
       just <code>SHA256("OH1-room-v1|" + egk)</code> truncated to 16 bytes —
@@ -359,7 +405,7 @@
       ciphertext teaches nothing about the next. (4) Your Ed25519 identity
       signs every envelope; peer id = hash of the public key, so nobody can
       claim an id they can't sign for.</p>
-      <p><strong>How deep the nesting goes.</strong> Keys are sealed under
+      <p data-i18n-html="crypto.p3"><strong>How deep the nesting goes.</strong> Keys are sealed under
       keys, always forward: the room key is delivered to new members sealed
       under the GK channel, whose keystream itself is bound to (room, epoch,
       recipient) — a capture of that envelope only works for that one
@@ -377,8 +423,8 @@
 </main>
 
 <footer class="site">
-  <p class="slogan">Every Word is a Key</p>
-  <p class="meta">
+  <p class="slogan" data-i18n="foot.slogan">Every Word is a Key</p>
+  <p class="meta" data-i18n-html="foot.meta">
     Source at <a href="https://github.com/ex4n1m0/OnlyHumans/tree/main">github.com/ex4n1m0/OnlyHumans</a><br>
     The server can't read messages, but it sees limited connection metadata —
     see <a href="#security">security</a>.<br>
@@ -387,28 +433,174 @@
 </footer>
 
 <script>
-  // Live presence — the same anonymous counter the app's green dot uses,
-  // plus the live-rooms count (rooms with a host record right now).
+  // Language — English / 简体中文 (docs/chinese-simplified-study.md).
+  // One shared key, oh-lang, also read by the /join portal. English copy
+  // lives in the HTML (crawlers + no-JS); this table swaps it at run time,
+  // synchronously before first paint, so nothing flickers.
   (function () {
+    var T = {
+      "skip": ["Skip to content", "跳到主要内容"],
+      "kin.label": ["From the same maker", "同一出品"],
+      "kin.1": ['<b>DeepFlux</b> &mdash; the AI-native media &amp; download suite', '<b>DeepFlux</b> —— AI 原生的媒体与下载套件'],
+      "kin.2": ['<b>n38worth</b> &mdash; the human trading simulation', '<b>n38worth</b> —— 人类交易模拟'],
+      "pill.rooms.title": ["Rooms with a live host right now — just a count; the server can't see inside any room.", "当前有房主在线的房间数——只是个数字；服务器看不到任何房间的内部。"],
+      "pill.live.title": ["Everyone online heartbeats an anonymous session token — no names, no peer ids.", "每位在线者都会匿名地心跳一个会话令牌——没有名字，没有对端 id。"],
+      "nav.join": ["Join", "加入"],
+      "hero.top": ["Private Chat Rooms", "私密聊天室"],
+      "hero.h1": ["Every Word is a <em>Key</em>", "每个词都是一把<em>钥匙</em>"],
+      "hero.lede": ["A shared word is your key. Choose a word together, then enter it independently. The same word opens the same private encrypted room.", "一个共享的词就是你的钥匙。一起选定一个词，然后各自输入——相同的词，打开同一间私密加密房间。"],
+      "hero.cta": ["Join from your browser", "直接在浏览器中加入"],
+      "hero.anywhere": ["Any device — phone, tablet, or desktop.", "任何设备——手机、平板或电脑都可以。"],
+      "hiw.h": ["How it works", "工作原理"],
+      "step1.h": ["Choose a name", "选一个名字"],
+      "step1.p": ["Your identity is a key created on your device. No email, no phone number.", "你的身份是一把在你设备上生成的密钥。无需邮箱，无需手机号。"],
+      "step2.h": ["Enter a word", "输入一个词"],
+      "step2.p": ["Everyone with the same word lands in the same room. For private rooms, share an unguessable word.", "输入相同词的人会进入同一间房间。私密房间，请共享一个猜不到的词。"],
+      "step3.h": ["Talk", "开始交谈"],
+      "step3.p": ["Messages are sealed end-to-end and travel directly between members when possible, and sealed through the site's mailbox when they can't.", "消息经端到端密封：能直连时在成员之间直接传输，不能直连时通过站内中转邮箱密封送达。"],
+      "sec.h": ["Security in plain terms", "安全性，通俗地说"],
+      "tier1.h": ["Protected", "受保护的"],
+      "tier1.1": ["Message content — encrypted on your device, a key per message", "消息内容——在你的设备上加密，每条消息一把独立密钥"],
+      "tier1.2": ["Room keys — sealed individually for each member", "房间密钥——为每位成员单独密封"],
+      "tier1.3": ["Your identity — a key pair that exists only on your device", "你的身份——只存在于你设备上的密钥对"],
+      "tier2.h": ["Visible to the server", "服务器可见的"],
+      "tier2.1": ["Signed, expiring peer addresses and who hosts which room", "经过签名、会过期的对端地址，以及谁在主持哪间房间"],
+      "tier2.2": ["An anonymous online token, random per session", "匿名的在线令牌，每次会话随机生成"],
+      "tier2.3": ["Fallback-mail timing, size, and sender/recipient ids", "中转邮件的时间、大小与收发双方 id"],
+      "tier2.verdict": ["The server can never read a word — but it can see this metadata, so we say so.", "服务器永远读不到任何一个词——但它能看到这些元数据，所以我们如实说明。"],
+      "tier3.h": ["Honest limits", "诚实的边界"],
+      "tier3.1": ["A compromised device reads what's on its screen", "被攻破的设备能读到它屏幕上的一切"],
+      "tier3.2": ["Guessable words aren't safe for private rooms", "猜得到的词不适合私密房间"],
+      "tier3.3": ["No global traffic-analysis resistance; keys live in browser storage — mind shared machines", "没有全局的流量分析对抗；密钥保存在浏览器存储里——共用电脑请留意"],
+      "faq.h": ["FAQ", "常见问题"],
+      "faq1.q": ["Do I need an account?", "需要注册账号吗？"],
+      "faq1.a": ["No. Choose a name and enter a room word. Your device creates a local identity key the first time you join.", "不需要。选一个名字，输入一个房间词。第一次加入时，你的设备会在本地创建身份密钥。"],
+      "faq2.q": ["How do rooms work?", "房间是怎么运作的？"],
+      "faq2.a": ["Everyone typing the exact same word meets in the same room. For private conversations, share an unguessable word — only people who know it can find you.", "输入完全相同的词的人，会在同一间房间相遇。私密对话，请共享一个猜不到的词——只有知道它的人才能找到你。"],
+      "faq3.q": ["Where do my messages live?", "我的消息存在哪里？"],
+      "faq3.a": ["In your browser session, encrypted — close the tab and the transcript is gone. The site never sees or stores a single word.", "在你的浏览器会话里，并且始终加密——关闭标签页，聊天记录即消失。网站永远看不到、也不会存储任何一个词。"],
+      "faq4.q": ["Someone was offline. Is my message lost?", "对方当时不在线，我的消息丢了吗？"],
+      "faq4.a": ["No — it waits, sealed, in the site's fallback mailbox and arrives when they're back, usually within a minute or two.", "没有丢——它会密封保存在站内中转邮箱里，对方一回来就会收到，通常在一两分钟之内。"],
+      "faq5.q": ["Does it work on phones?", "手机上能用吗？"],
+      "faq5.a": ['Yes — open <a href="/join">/join</a> in any browser, nothing to install.', '能——在任何浏览器打开 <a href="/join">/join</a> 即可，无需安装任何东西。'],
+      "crypto.h": ["The encryption, technically", "加密的细节（技术向）"],
+      "crypto.p1": ['<strong>The primitives.</strong> Everything is one AEAD cipher — XChaCha20-Poly1305 — with keys derived through HKDF-SHA256, identities as Ed25519 keypairs, and the word stretched through Argon2id at 64&nbsp;MiB / t=3 / 1 thread. Every sealed frame carries AAD binding its context (kind, room, epoch, sender, seq), so a ciphertext can\'t be replayed into another room, generation, or slot — the tag fails.', '<strong>基础组件。</strong>全部采用单一的 AEAD 算法——XChaCha20-Poly1305——密钥经 HKDF-SHA256 派生，身份是 Ed25519 密钥对，词本身经 Argon2id 拉伸（64&nbsp;MiB / t=3 / 单线程）。每个密封帧都携带绑定其上下文的 AAD（类型、房间、纪元、发送者、序号），所以一段密文无法被重放进另一间房间、另一代或另一个位置——验证标签会失败。'],
+      "crypto.p2": ['<strong>The key stack, bottom to top.</strong> (1) The word is stretched with Argon2id into an "effective GK" (the GK is the public per-release universe key — it opens no room by itself); the room id is just <code>SHA256("OH1-room-v1|" + egk)</code> truncated to 16 bytes — the word itself never crosses the network, and the hash is one-way. (2) The room key is 32 random bytes minted by the founder; it\'s the actual chat key. (3) Every single message gets its own key: <code>HKDF(roomKey, room+epoch, kind+sender+seq)</code> plus a random nonce — so no message reuses a keystream, and compromising one ciphertext teaches nothing about the next. (4) Your Ed25519 identity signs every envelope; peer id = hash of the public key, so nobody can claim an id they can\'t sign for.', '<strong>密钥栈，自底向上。</strong>(1) 词经 Argon2id 拉伸为“有效 GK”（GK 是每个发行版本公开的宇宙密钥——它本身打不开任何房间）；房间 id 只是 <code>SHA256("OH1-room-v1|" + egk)</code> 截断出的 16 字节——词本身从不经过网络，且哈希是单向的。(2) 房间密钥是创建者铸造的 32 个随机字节；它才是真正的聊天密钥。(3) 每条消息都有自己的密钥：<code>HKDF(roomKey, room+epoch, kind+sender+seq)</code> 加上随机 nonce——任何消息都不重用密钥流，攻破一段密文也推不出下一段。(4) 你的 Ed25519 身份为每个信封签名；对端 id = 公钥的哈希，没人能冒用一个自己无法签名的 id。'],
+      "crypto.p3": ['<strong>How deep the nesting goes.</strong> Keys are sealed under keys, always forward: the room key is delivered to new members sealed under the GK channel, whose keystream itself is bound to (room, epoch, recipient) — a capture of that envelope only works for that one recipient in that one generation. Rotation mints a fresh 256-bit key sealed under the current one, so only current members transition and evicted members hold a dead key forever; epoch counters forbid key regressions. Warp goes one level deeper still — it re-keys the entire universe, so today\'s key unlocks nothing from any previous universe. So the deepest an attacker can reach by unwinding is: compromise one member device → read that room until the next rotation — that\'s the floor, and it\'s also the eviction lever (word = admission, rotation = eviction).', '<strong>嵌套有多深。</strong>密钥永远向前封装：房间密钥以 GK 信道密封送达新成员，而该信道的密钥流本身绑定（房间、纪元、接收者）——截获那个信封，只对那一代里的那一个接收者有效。轮换会铸造一把全新的 256 位密钥，并用当前密钥密封——只有当前成员能完成过渡，被移出的成员手里的钥匙从此作废；纪元计数器禁止密钥回退。Warp 更进一步——它给整个宇宙换钥，今天的钥匙打不开之前任何宇宙里的东西。攻击者一路拆到底的极限是：攻破一台成员设备 → 在下一次轮换之前读取那间房间——这就是底线，同时它也是移出成员的杠杆（词 = 准入，轮换 = 移出）。'],
+      "foot.slogan": ["Every Word is a Key", "每个词都是一把钥匙"],
+      "foot.meta": ['Source at <a href="https://github.com/ex4n1m0/OnlyHumans/tree/main">github.com/ex4n1m0/OnlyHumans</a><br>The server can\'t read messages, but it sees limited connection metadata — see <a href="#security">security</a>.<br>No trackers, no cookies, no third-party requests.', '源码在 <a href="https://github.com/ex4n1m0/OnlyHumans/tree/main">github.com/ex4n1m0/OnlyHumans</a><br>服务器读不到消息，但能看到有限的连接元数据——见<a href="#security">安全说明</a>。<br>无追踪器，无 Cookie，无第三方请求。'],
+      "doc.title": ["OnlyHumans — Every Word is a Key", "OnlyHumans — 每个词都是一把钥匙"],
+      "meta.desc": ["Private chat without accounts. Choose a name and a shared word — end-to-end encrypted, in any browser. The word never leaves your device.", "无需账号的私密聊天。选一个名字，共享一个词——端到端加密，任何浏览器都行。这个词永远不会离开你的设备。"],
+      "og.desc": ["Private chat in your browser — no accounts, no servers reading your words.", "在浏览器里私密聊天——无账号，服务器读不到你说的任何一句话。"],
+      "og.alt": ["OnlyHumans — private chat rooms in any browser. Every word is a key.", "OnlyHumans——任何浏览器里的私密聊天室。每个词都是一把钥匙。"]
+    };
+    var META = [
+      ["meta[name=description]", "meta.desc", "content"],
+      ['meta[property="og:title"]', "doc.title", "content"],
+      ['meta[property="og:description"]', "og.desc", "content"],
+      ['meta[property="og:image:alt"]', "og.alt", "content"]
+    ];
+
+    var LANG = "en";
+    function apply(lang, persist) {
+      LANG = lang === "zh" ? "zh" : "en";
+      var i = LANG === "zh" ? 1 : 0;
+      document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
+      document.title = T["doc.title"][i];
+      for (var k in T) {
+        if (k.indexOf("doc.") === 0 || k.indexOf("meta.") === 0 || k.indexOf("og.") === 0) continue;
+        var html = document.querySelectorAll('[data-i18n-html="' + k + '"]');
+        for (var j = 0; j < html.length; j++) html[j].innerHTML = T[k][i];
+        var text = document.querySelectorAll('[data-i18n="' + k + '"]');
+        for (var j2 = 0; j2 < text.length; j2++) text[j2].textContent = T[k][i];
+        var tit = document.querySelectorAll('[data-i18n-title="' + k + '"]');
+        for (var j3 = 0; j3 < tit.length; j3++) tit[j3].setAttribute("title", T[k][i]);
+      }
+      for (var m = 0; m < META.length; m++) {
+        var el = document.querySelector(META[m][0]);
+        if (el) el.setAttribute(META[m][2], T[META[m][1]][i]);
+      }
+      document.getElementById("lang-cur").textContent = LANG === "zh" ? "中文" : "EN";
+      var opts = document.querySelectorAll("#lang-list button");
+      for (var o = 0; o < opts.length; o++)
+        opts[o].setAttribute("aria-checked", opts[o].getAttribute("data-lang") === LANG ? "true" : "false");
+      if (persist) { try { localStorage.setItem("oh-lang", LANG); } catch (e) {} }
+      renderPills();
+    }
+
+    // Resolution order: ?lang= deep link → stored choice → browser
+    // language → English. ?lang= and an explicit click persist; auto-detect
+    // applies without writing (a browser-language change isn't a choice).
+    var q = new URLSearchParams(location.search).get("lang");
+    var stored = null;
+    try { stored = localStorage.getItem("oh-lang"); } catch (e) {}
+    if (q === "en" || q === "zh") apply(q, true);
+    else if (stored === "en" || stored === "zh") apply(stored, false);
+    else if (/^zh\b/i.test(navigator.language || "")) apply("zh", false);
+    else apply("en", false);
+
+    // The dropdown — one open state, closed by outside click / Escape.
+    var btn = document.getElementById("lang-btn");
+    var list = document.getElementById("lang-list");
+    function setOpen(open) {
+      list.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      setOpen(list.hidden);
+    });
+    list.addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-lang]");
+      if (!b) return;
+      apply(b.getAttribute("data-lang"), true);
+      setOpen(false);
+    });
+    document.addEventListener("click", function (e) {
+      if (!list.hidden && !list.contains(e.target) && e.target !== btn) setOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !list.hidden) setOpen(false);
+    });
+
+    // Live presence — the same anonymous counter the app's green dot uses,
+    // plus the live-rooms count (rooms with a host record right now).
+    // Pill tails are language-aware (English pluralizes, Chinese doesn't)
+    // and re-render from the cached counts on a language switch — no
+    // waiting out the 60s tick.
     var pill = document.getElementById("live-pill");
     var rpill = document.getElementById("rooms-pill");
+    var presence = null; // last good { online, rooms? }
+    function tails(lang) {
+      return lang === "zh"
+        ? { rooms: "个房间在线", humans: "人在线" }
+        : { rooms: "rooms live", humans: "humans online" };
+    }
+    function renderPills() {
+      if (!presence) return;
+      var t = tails(LANG);
+      document.getElementById("live-count").textContent = String(presence.online);
+      document.getElementById("live-word").textContent =
+        presence.online === 1 && LANG === "en" ? "human online" : t.humans;
+      pill.hidden = false;
+      // 0 shows too ("0 rooms live" — same honesty as "0 humans online");
+      // only a missing field (server scan failed) stays hidden
+      if (typeof presence.rooms === "number") {
+        document.getElementById("rooms-count").textContent = String(presence.rooms);
+        document.getElementById("rooms-word").textContent =
+          presence.rooms === 1 && LANG === "en" ? "room live" : t.rooms;
+        rpill.hidden = false;
+      } else {
+        rpill.hidden = true;
+      }
+    }
     function tick() {
       fetch("/api/presence", { cache: "no-store" })
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (j) {
           if (!j || typeof j.online !== "number") return;
-          document.getElementById("live-count").textContent = String(j.online);
-          document.getElementById("live-word").textContent = j.online === 1 ? "human" : "humans";
-          pill.hidden = false;
-          // 0 shows too ("0 rooms live" — same honesty as "0 humans online");
-          // only a missing field (server scan failed) stays hidden
-          if (typeof j.rooms === "number") {
-            document.getElementById("rooms-count").textContent = String(j.rooms);
-            document.getElementById("rooms-word").textContent = j.rooms === 1 ? "room" : "rooms";
-            rpill.hidden = false;
-          } else {
-            rpill.hidden = true;
-          }
+          presence = { online: j.online, rooms: typeof j.rooms === "number" ? j.rooms : undefined };
+          renderPills();
         })
         .catch(function () {});
     }
