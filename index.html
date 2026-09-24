@@ -69,6 +69,21 @@
   .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 34px rgba(86,197,218,.38); }
   .btn-primary:active { transform: translateY(0); }
 
+  /* sibling-projects strip — above the sticky nav, scrolls away */
+  .kin { border-bottom: 1px solid var(--line); background: rgba(5, 7, 12, .55); }
+  .kin-row {
+    max-width: 1080px; margin: 0 auto; padding: .45rem 1.4rem;
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: .35rem .9rem; font-size: .74rem; color: var(--muted);
+  }
+  .kin-label { font-size: .62rem; letter-spacing: .16em; text-transform: uppercase; }
+  .kin-sep { width: 3px; height: 3px; border-radius: 50%;
+             background: rgba(236, 233, 226, .22); }
+  a.kin-link { color: var(--muted); text-decoration: none; white-space: nowrap; }
+  a.kin-link b { font-weight: 600; color: var(--ink-soft); }
+  a.kin-link:hover, a.kin-link:focus-visible,
+  a.kin-link:hover b, a.kin-link:focus-visible b { color: var(--ink); }
+
   /* nav */
   header.site {
     position: sticky; top: 0; z-index: 50;
@@ -99,6 +114,8 @@
   }
   .nav-inner .btn { min-height: 40px; padding: .5rem 1.15rem; font-size: .92rem; }
   @media (max-width: 560px) { .live-pills { display: none; } }
+  /* the dot separator wraps to a line's end and reads as a stray mark */
+  @media (max-width: 560px) { .kin-sep { display: none; } }
 
   /* hero — logo on top, centered */
   .hero {
@@ -181,6 +198,15 @@
 </head>
 <body>
 <a class="skip-link" href="#how-it-works">Skip to content</a>
+
+<div class="kin">
+  <div class="kin-row">
+    <span class="kin-label">From the same maker</span>
+    <a class="kin-link" href="https://deepflux.space/" target="_blank" rel="noopener"><b>DeepFlux</b> &mdash; the AI-native media &amp; download suite</a>
+    <span class="kin-sep" aria-hidden="true"></span>
+    <a class="kin-link" href="https://n38worth.com/" target="_blank" rel="noopener"><b>n38worth</b> &mdash; the human trading simulation</a>
+  </div>
+</div>
 
 <header class="site">
   <div class="nav-inner">
