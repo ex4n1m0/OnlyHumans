@@ -246,6 +246,14 @@ export class RoomCrypto {
   open(frame: Sealed, kind: Uint8Array): Uint8Array {
     if (frame.room_id_hex !== this.roomHex) throw new Error("frame belongs to a different room");
     if (frame.epoch !== this.epoch) throw new Error(`frame epoch ${frame.epoch} != current ${this.epoch}`);
+    // Frame headers are peer-supplied JSON before they reach this point.
+    // A string seq would silently coerce to zero bytes in u64le() (MAC
+    // still verifies), then ride into DOM attributes — reject the shape
+    // here so every caller gets a typed header or a throw.
+    if (typeof frame.seq !== "number" || !Number.isInteger(frame.seq) || frame.seq < 0 ||
+        typeof frame.sender !== "string" || !frame.sender.length || frame.sender.length > 64) {
+      throw new Error("bad frame header");
+    }
     const mk = this.messageKey(frame.sender, frame.seq, kind);
     const nonce = unb64(frame.nonce_b64);
     const ct = unb64(frame.ct_b64);

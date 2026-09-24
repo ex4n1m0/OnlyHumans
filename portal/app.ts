@@ -49,7 +49,21 @@ const BROWSER = (() => {
   return `${name} · ${os}`;
 })();
 
-interface Msg { ts: number; sender: string; name: string; body: string; out: boolean; img?: ImgMsg; file?: FileMsg }
+/** A reaction frame's validated body: react to `s`'s message number `q`
+ *  with `e` (x = remove mine). The reactor is always the FRAME sender —
+ *  the body only selects the target, so attribution can't be forged. */
+interface ReactBody { s: string; q: number; e: string; x: boolean }
+
+interface Msg {
+  ts: number; sender: string; name: string; body: string; out: boolean;
+  /// The frame's wire seq — with `sender`, the message identity reactions
+  /// target (unique per sender, replay-guarded by seenSeq).
+  q?: number;
+  img?: ImgMsg; file?: FileMsg;
+  /// Live reactions: emoji → set of reacting peer ids. Exactly as
+  /// ephemeral as the message it hangs on — dies with its room/DM.
+  re?: Map<string, Set<string>>;
+}
 
 /** One ephemeral two-person room (mirrors core rooms.rs DmRoom): a random
  *  key only the two peers hold, memory-only, never rotated, delivered
@@ -280,7 +294,7 @@ async function pickFile(file: Blob | null | undefined) {
  *  out of the src attribute); file frames validate the same way plus an
  *  atob round-trip, and their bytes are never rendered — only downloaded;
  *  anything else is plain text as before. */
-function parseChatBody(body: string): { text: string; img?: ImgMsg; file?: FileMsg } {
+function parseChatBody(body: string): { text: string; img?: ImgMsg; file?: FileMsg; react?: ReactBody } {
   if (body.startsWith('{"ohimg"')) {
     try {
       const j = JSON.parse(body) as { ohimg?: { d?: unknown; w?: unknown; h?: unknown; m?: unknown }; t?: unknown };
@@ -316,6 +330,18 @@ function parseChatBody(body: string): { text: string; img?: ImgMsg; file?: FileM
       }
     } catch { /* not a file frame — fall through to text */ }
   }
+  if (body.startsWith('{"ohreact"')) {
+    try {
+      const j = JSON.parse(body) as { ohreact?: { s?: unknown; q?: unknown; e?: unknown; x?: unknown } };
+      const r = j.ohreact;
+      if (
+        r && typeof r.s === "string" && r.s.length > 0 && r.s.length <= 64 &&
+        typeof r.q === "number" && Number.isInteger(r.q) && validEmoji(r.e)
+      ) {
+        return { text: "", react: { s: r.s, q: r.q, e: r.e, x: r.x === 1 } };
+      }
+    } catch { /* not a reaction frame — fall through to text */ }
+  }
   return { text: body };
 }
 
@@ -349,6 +375,112 @@ function triggerFileDownload(f: FileMsg) {
   a.href = fileDownloadUrl(f);
   a.download = f.n;
   a.click();
+}
+
+// ---------------------------------------------------------------- emojis
+// docs/emoji-study.md: two affordances — a composer picker and message
+// reactions. Emoji already ride the UTF-8 text path; reactions are Chat
+// frames with the {"ohreact":{s,q,e,x?}} body convention (the ohimg/ohfile
+// launch pattern: old clients render the JSON as text, ugly and benign).
+
+/// The quick row on a react picker — one tap, the six classics.
+const QUICK_REACT = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+
+/// Curated picker set (no country flags — Windows' emoji font ships none,
+/// so flags would render as letter pairs on the primary desktop platform).
+/// Categories are space-separated single code points (+ VS16 forms only).
+const EMOJI_CATEGORIES: Array<[string, string]> = [
+  ["faces", "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 🙃 😉 😊 😇 🥰 😍 🤩 😘 😗 😋 😛 😜 🤪 😝 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🤧 🥵 🥶 🥴 😵 🤯 🤠 🥳 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 😦 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 🤡 👻 👽 🤖 💩 ☺️ ✨"],
+  ["hands", "👋 🤚 ✋ 🖖 👌 🤌 🤏 ✌️ 🤞 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏 💪 ✍️ 💅 🤳 🕺 💃 🧘"],
+  ["hearts", "❤️ 🧡 💛 💚 💙 💜 🖤 🤍 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 💌"],
+  ["nature", "🌵 🎄 🌲 🌳 🌴 🌱 🌿 ☘️ 🍀 🍃 🍂 🍁 🍄 🐚 🌾 💐 🌷 🌹 🥀 🌺 🌸 🌼 🌻 🌞 🌝 🌛 🌜 🌚 🌙 ⭐ 🌟 💫 ☄️ 🌈 ☀️ ⛅ ☁️ 🌧️ ⛈️ 🌩️ 🌨️ ❄️ ☃️ ⛄ 🌊 💧 💦 ☔ 🌍 🌎 🌏"],
+  ["animals", "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🙈 🙉 🙊 🐔 🐧 🐦 🐤 🦆 🦅 🦉 🦇 🐺 🐗 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐜 🕷️ 🦂 🐢 🐍 🦎 🐙 🦑 🦐 🦞 🦀 🐡 🐠 🐟 🐬 🐳 🐋 🦈 🐊 🐅 🐆 🦓 🦍 🐘 🦏 🐪 🦒 🦘 🐃 🐂 🐄 🐎 🐖 🐏 🐑 🦙 🐐 🦌 🐕 🐩 🐈 🐓 🦃 🦚 🦜 🦢 🐇 🦔 🐁 🐀"],
+  ["food", "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🍈 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🍆 🥑 🥦 🥬 🥒 🌶️ 🌽 🥕 🧄 🧅 🥔 🍠 🥐 🥯 🍞 🥖 🥨 🧀 🥚 🍳 🥞 🧇 🥓 🥩 🍗 🍖 🌭 🍔 🍟 🍕 🥪 🌮 🌯 🥗 🥘 🍝 🍜 🍲 🍛 🍣 🍱 🥟 🍤 🍙 🍚 🍘 🍥 🥠 🍢 🍡 🍧 🍨 🍦 🥧 🧁 🍰 🎂 🍮 🍭 🍬 🍫 🍿 🍩 🍪 🌰 🥜 🍯 🥛 🍼 ☕ 🍵 🧃 🥤 🍶 🍺 🍻 🥂 🍷 🥃 🍸 🍹 🍾"],
+  ["play", "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏉 🎱 🏓 🏸 🏒 🏏 🥊 🥋 🎯 🎳 🎮 🕹️ 🎲 🧩 🎨 🖌️ 🖍️ ✏️ ✒️ 🖊️ 🖋️ 📌 📍 📎 ✂️ 🎬 🎤 🎧 🎼 🎹 🥁 🎷 🎺 🎸 🎻 🎵 🎶 🏆 🥇 🥈 🥉 🏅 🎖️ 🏵️ 🎫 🎟️ 🎁 🎈 🎉 🎊 🎆 🎇 🧨"],
+  ["travel", "🚗 🚕 🚙 🚌 🚎 🏎️ 🚓 🚑 🚒 🚐 🚚 🚛 🚜 🛴 🚲 🛵 🏍️ 🚨 🚔 🚍 🚘 🚖 🚡 🚠 🚟 🚃 🚋 🚞 🚝 🚄 🚅 🚈 🚂 🚆 🚇 🚊 🚉 ✈️ 🛫 🛬 🛩️ 💺 🛰️ 🚀 🛸 🚁 🛶 ⛵ 🚤 🛥️ 🛳️ ⛴️ ⚓ ⛽ 🚦 🚧 🗺️ 🗿 🗽 🗼 🏰 🏯 🏟️ 🎡 🎢 🎠 ⛲ ⛱️ 🏖️ 🏝️ 🏜️ 🌋 ⛰️ 🏔️ 🏕️ ⛺ 🌃 🌆 🌇 🌉"],
+  ["things", "⌚ 📱 💻 ⌨️ 🖥️ 🖨️ 🖱️ 💾 💿 📀 📷 📸 📹 🎥 📞 ☎️ 📟 📺 📻 🎙️ ⏰ ⏳ ⌛ 📡 🔋 🔌 💡 🔦 🕯️ 🧯 💸 💵 💳 🧾 ✉️ 📧 📨 📩 📤 📥 📦 📫 📮 🗄️ 🗑️ 🔒 🔓 🔏 🔐 🔑 🗝️ 🔨 ⛏️ 🛠️ 🗡️ ⚔️ 🏹 🛡️ 🔧 🔩 ⚙️ 🗜️ ⚖️ 🔗 ⛓️ 🧰 🧲 🧪 🧫 🧬 🔬 🔭 💉 💊 🩹 🩺 🚪 🛏️ 🚽 🚿 🛁 🧼 🧽 🧹 🧺 🧻 🧴 🛒 👑 💎 💰 🎗️"],
+  ["signs", "♻️ ⚜️ 🔱 📴 📳 🆚 🆕 🆓 🆒 🆗 🔝 🔜 ☑️ ✔️ ❌ ❗ ❓ ❕ ❔ ⁉️ 💯 ⚠️ 🚭 📵 ❎ ✅ 🌐 💤 ➕ ➖ ➗ ✖️ ♾️ ‼️ 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ 🟤 🔷 🔶 ⬛ ⬜"],
+];
+
+/// Session-only recents — in memory, nothing stored anywhere.
+const emojiRecents: string[] = [];
+function rememberRecent(g: string) {
+  const i = emojiRecents.indexOf(g);
+  if (i >= 0) emojiRecents.splice(i, 1);
+  emojiRecents.unshift(g);
+  if (emojiRecents.length > 8) emojiRecents.length = 8;
+}
+
+/// Structurally an emoji: 1–8 code points — a pictographic / flag-half /
+/// keycap base, then only modifiers (VS16, skin tones, keycap combiner)
+/// and ZWJ joins between further bases. `e` is peer-supplied and reaches
+/// the DOM, so the shape is checked, never trusted (esc() still runs at
+/// the sink — validation is defense in depth, not the only layer).
+function validEmoji(s: unknown): s is string {
+  if (typeof s !== "string" || !s.length || s.length > 24) return false;
+  const cps = [...s];
+  if (cps.length > 8) return false;
+  const base = (cp: string) =>
+    /\p{Extended_Pictographic}/u.test(cp) || /^[\u{1F1E6}-\u{1F1FF}0-9#*]$/u.test(cp);
+  const mod = (cp: string) =>
+    cp === "\u200D" || cp === "\uFE0F" || /^[\u{1F3FB}-\u{1F3FF}\u20E3\u{1F1E6}-\u{1F1FF}]$/u.test(cp);
+  if (!base(cps[0]!)) return false;
+  for (let i = 1; i < cps.length; i++) {
+    const cp = cps[i]!;
+    if (cp === "\u200D") {
+      if (i + 1 >= cps.length || !base(cps[i + 1]!)) return false;
+      i++;
+    } else if (!mod(cp)) return false;
+  }
+  return true;
+}
+
+function closeEmojiPops() {
+  document.querySelectorAll(".emojipop").forEach((n) => n.remove());
+}
+
+/** Emoji popover: the composer's insert-picker and a message's react
+ *  picker share it. Anchored like openMenu (visual-viewport aware) or to a
+ *  long-press point; `quick` starts on the six-classics row whose ⋯
+ *  expands to the full grid inside the same popover. */
+function openEmojiPop(at: HTMLElement | { x: number; y: number }, onPick: (g: string) => void, quick = false) {
+  closeMenus();
+  closeEmojiPops();
+  const p = document.createElement("div");
+  p.className = "emojipop";
+  let full = !quick;
+  const fill = () => {
+    const recents = full && emojiRecents.length
+      ? `<div class="eg-cat">recent</div><div class="eg-row">${emojiRecents.map((g) => `<button type="button" class="eg" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`
+      : "";
+    p.innerHTML = `
+      ${!full ? `<div class="eg-cat">react</div>
+        <div class="eg-row quick">${QUICK_REACT.map((g) => `<button type="button" class="eg big" data-g="${esc(g)}">${esc(g)}</button>`).join("")}
+          <button type="button" class="eg big" data-g="__more" title="more emoji">⋯</button></div>` : ""}
+      ${recents}
+      ${full ? EMOJI_CATEGORIES.map(([label, glyphs]) =>
+        `<div class="eg-cat">${label}</div><div class="eg-row">${glyphs.split(" ").map((g) => `<button type="button" class="eg" data-g="${esc(g)}">${esc(g)}</button>`).join("")}</div>`).join("") : ""}`;
+    p.querySelectorAll<HTMLButtonElement>("button.eg").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const g = b.dataset.g!;
+        if (g === "__more") { full = true; fill(); return; }
+        closeEmojiPops();
+        rememberRecent(g);
+        onPick(g);
+      });
+    });
+  };
+  fill();
+  document.body.appendChild(p);
+  // Anchor: under an element, or at a long-press point — clamped to the
+  // visible viewport exactly like openMenu (iOS keyboard panning).
+  const pan = window.visualViewport?.offsetTop ?? 0;
+  const visH = window.visualViewport?.height ?? window.innerHeight;
+  const left = at instanceof HTMLElement ? at.getBoundingClientRect().left : at.x - 24;
+  const top = at instanceof HTMLElement ? at.getBoundingClientRect().bottom + 6 : at.y + 10;
+  p.style.left = Math.max(8, Math.min(left, window.innerWidth - p.offsetWidth - 8)) + "px";
+  p.style.top = Math.max(8 + pan, Math.min(top + pan, pan + visH - p.offsetHeight - 8)) + "px";
 }
 
 // The composer picker takes pictures AND files: pictures take the
@@ -925,7 +1057,8 @@ class Portal {
       if (seq <= (this.seenSeq.get(sender) ?? 0)) return; // replay guard
       this.seenSeq.set(sender, seq);
       const pm = parseChatBody(body);
-      this.msgs.push({ ts: Date.now(), sender, name: this.displayName(sender), body: pm.text, out: false, img: pm.img, file: pm.file });
+      if (pm.react) { this.applyReact(this.msgs, sender, pm.react); return; }
+      this.msgs.push({ ts: Date.now(), sender, name: this.displayName(sender), body: pm.text, out: false, q: seq, img: pm.img, file: pm.file });
       return;
     }
     if ("Members" in env) {
@@ -1220,7 +1353,46 @@ class Portal {
       toast("this attachment didn't fit the mail limit — nothing was sent");
       return;
     }
-    this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
+    this.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, q: this.mySeq, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
+    render();
+    await this.fanOut({ Chat: { frame } });
+  }
+
+  /** Fold a reaction frame into the message it names. The target must
+   *  already be known locally — late or orphaned reactions (target evicted
+   *  with the inbox window) drop silently: reactions are exactly as
+   *  ephemeral as the messages they annotate. Caps: ≤24 distinct emoji and
+   *  ≤8 live reactions per peer per message, so a hostile member can bloat
+   *  a bubble no further; overflow is ignored without error. */
+  applyReact(list: Msg[], from: string, r: ReactBody) {
+    const m = list.find((x) => x.sender === r.s && x.q === r.q);
+    if (!m) return;
+    if (r.x) {
+      m.re?.get(r.e)?.delete(from);
+      if (m.re && !m.re.get(r.e)?.size) m.re.delete(r.e);
+      return;
+    }
+    if (!m.re) m.re = new Map();
+    if (!m.re.has(r.e) && m.re.size >= 24) return;
+    let mine = 0;
+    for (const s of m.re.values()) if (s.has(from)) mine++;
+    if (mine >= 8 && !m.re.get(r.e)?.has(from)) return;
+    const set = m.re.get(r.e) ?? new Set<string>();
+    set.add(from);
+    m.re.set(r.e, set);
+  }
+
+  /** Toggle a reaction on one of this room's messages: a Chat frame with
+   *  the {"ohreact":…} body, bucket-padded like short text (same size
+   *  class), fanned out exactly like a text message. */
+  async react(target: { sender: string; q: number }, e: string, on: boolean) {
+    if (!this.room) return;
+    this.mySeq++;
+    const r: Record<string, unknown> = { s: target.sender, q: target.q, e };
+    if (!on) r.x = 1;
+    const frame = this.room.seal(this.peerId, this.mySeq, KIND.chat, utf8(JSON.stringify({ ohreact: r })));
+    if (!mailFits({ Chat: { frame } })) return;
+    this.applyReact(this.msgs, this.peerId, { s: target.sender, q: target.q, e, x: !on });
     render();
     await this.fanOut({ Chat: { frame } });
   }
@@ -1350,7 +1522,30 @@ class Portal {
     // Count the send only now: the split-brain adoption rule keys off
     // frames actually sent under our key.
     dm.sent++;
-    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
+    dm.msgs.push({ ts: Date.now(), sender: this.peerId, name: this.name, body, out: true, q: dm.mySeq, img: img ? payloadToImg(img) : undefined, file: file ? mintFileMsg(file) : undefined });
+    render();
+    const batch: Array<{ to: string; env: Envelope }> = [{ to: dm.peer, env: { Chat: { frame } } }];
+    if (dm.unconfirmed) {
+      const inv = this.buildDmInvite(hex);
+      if (inv) batch.unshift({ to: dm.peer, env: inv });
+    }
+    await this.hub.mailPushBatch(this.peerId, this.pubB64, this.sign, batch).catch(() => {});
+  }
+
+  /** Same toggle inside a private chat — one recipient, the same
+   *  disciplines as sendDm: `sent` counts only frames that passed the
+   *  guard, and the invite still rides along while unconfirmed. A
+   *  reaction never bumps the unread counter on either side. */
+  async reactDm(hex: string, target: { sender: string; q: number }, e: string, on: boolean) {
+    const dm = this.dms.get(hex);
+    if (!dm) return;
+    dm.mySeq++;
+    const r: Record<string, unknown> = { s: target.sender, q: target.q, e };
+    if (!on) r.x = 1;
+    const frame = dm.crypto.seal(this.peerId, dm.mySeq, KIND.chat, utf8(JSON.stringify({ ohreact: r })));
+    if (!mailFits({ Chat: { frame } })) return;
+    dm.sent++;
+    this.applyReact(dm.msgs, this.peerId, { s: target.sender, q: target.q, e, x: !on });
     render();
     const batch: Array<{ to: string; env: Envelope }> = [{ to: dm.peer, env: { Chat: { frame } } }];
     if (dm.unconfirmed) {
@@ -1375,7 +1570,11 @@ class Portal {
     dm.seenSeq = frame.seq;
     dm.unconfirmed = false;
     const pm = parseChatBody(body);
-    dm.msgs.push({ ts: Date.now(), sender: from, name: this.displayName(from), body: pm.text, out: false, img: pm.img, file: pm.file });
+    // A reaction is not a message: fold it into its target and never bump
+    // the unread badge. (The unconfirmed flip above already happened — a
+    // reaction proves key possession like any frame.)
+    if (pm.react) { this.applyReact(dm.msgs, from, pm.react); return; }
+    dm.msgs.push({ ts: Date.now(), sender: from, name: this.displayName(from), body: pm.text, out: false, q: frame.seq, img: pm.img, file: pm.file });
     if (activeRoom !== frame.room_id_hex) dm.unread++;
   }
 
@@ -1598,6 +1797,7 @@ function closeMenus() { document.getElementById("open-menu")?.remove(); }
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  if (document.querySelector(".emojipop")) { closeEmojiPops(); return; }
   if (document.getElementById("open-menu")) { closeMenus(); return; }
   if (editingProfile) { editingProfile = false; avatarDraft = null; roomDraft = null; render(); return; }
   if (activeRoom) { activeRoom = null; render(); }
@@ -1605,6 +1805,8 @@ document.addEventListener("keydown", (e) => {
 document.addEventListener("click", (e) => {
   const m = document.getElementById("open-menu");
   if (m && !m.contains(e.target as Node)) closeMenus();
+  const p = document.querySelector(".emojipop");
+  if (p && !p.contains(e.target as Node)) closeEmojiPops();
 });
 
 /** One message row — narration lines (empty sender) render centered. */
@@ -1621,11 +1823,22 @@ function msgHtml(m: Msg): string {
     : "";
   const cap = m.body ? esc(m.body) : "";
   const cls = m.img || m.file ? `msg hasimg${m.file ? " hasfile" : ""}` : "msg";
-  if (m.out) return `<div class="${cls} out">${cap}${img}${file}${meta}</div>`;
+  // Reactions: one chip per emoji with its count; own reactions carry
+  // .mine; the tooltip names the reactors. The ☺ affordance sits at the
+  // bubble's corner (hover on pointer devices — touch uses long-press /
+  // right-click via the contextmenu handler on the messages pane).
+  const myId = portal.peerId;
+  const chips = m.re?.size
+    ? `<div class="reactions">${[...m.re.entries()].map(([e, set]) =>
+        `<button type="button" class="react${set.has(myId) ? " mine" : ""}" data-e="${esc(e)}" title="${esc([...set].map((p) => (p === myId ? "you" : portal.displayName(p))).join(", "))}">${esc(e)}<span class="re-n">${set.size}</span></button>`).join("")}</div>`
+    : "";
+  const rbtn = `<button type="button" class="reactbtn" title="react to this message" aria-label="add a reaction">☺</button>`;
+  const dat = `data-s="${esc(m.sender)}" data-q="${esc(String(m.q ?? 0))}"`;
+  if (m.out) return `<div class="${cls} out" ${dat}>${cap}${img}${file}${meta}${chips}${rbtn}</div>`;
   const hue = peerHue(m.sender);
   return `
     <div class="sender" style="color:hsl(${hue} 65% 70%)">${esc(m.name)}</div>
-    <div class="${cls} in">${cap}${img}${file}${meta}</div>`;
+    <div class="${cls} in" ${dat}>${cap}${img}${file}${meta}${chips}${rbtn}</div>`;
 }
 
 /// Unread DMs surface in the tab title — the only channel that signals
@@ -1763,14 +1976,14 @@ function render() {
               <span class="mname">${esc(dmName(peer))}</span>
               <span class="li-sub">${esc(bioOf(peer) || "via site")}</span>
             </div>
-            <button class="dm-btn" data-peer="${peer}" title="private chat with ${esc(dmName(peer))}" aria-label="private chat with ${esc(dmName(peer))}">⇄ message</button>
+            <button class="dm-btn" data-peer="${esc(peer)}" title="private chat with ${esc(dmName(peer))}" aria-label="private chat with ${esc(dmName(peer))}">⇄ message</button>
           </li>`).join("")}
         </ul>
         ${portal.dms.size ? `
         <div class="side-label">private chats</div>
         <ul class="member-list dm-list">
           ${[...portal.dms.entries()].map(([hex, dm]) => `
-          <li data-dm="${hex}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${esc(dmName(dm.peer))}">
+          <li data-dm="${esc(hex)}" class="dmrow ${activeRoom === hex ? "active" : ""}" title="${esc(dmName(dm.peer))}">
             ${avatarHtml(dm.peer, dmName(dm.peer), photoOf(dm.peer))}
             <div class="li-body">
               <span class="mname">${esc(dmName(dm.peer))}</span>
@@ -1835,6 +2048,7 @@ function render() {
         </div>`;
         })()}
         <div class="composer">
+          <button id="p-emoji" class="attach" type="button" title="insert an emoji" aria-label="insert an emoji">☺</button>
           <button id="p-attach" class="attach" type="button" title="attach a picture or a file — pictures are re-encoded on your device to 30 KB or less (EXIF stripped); files up to 30 KB travel as-is" aria-label="attach a picture or file">${PAPERCLIP}</button>
           <textarea id="p-send" rows="1" placeholder="${pendingImg || pendingFile ? "caption (optional)…" : activeDm ? "message privately… (Enter sends)" : "message the room… (Enter sends)"}" title="Enter sends · Shift+Enter adds a newline" autocomplete="off"></textarea>
           <button id="p-sendbtn" class="primary" type="button">Send</button>
@@ -2117,16 +2331,72 @@ function render() {
   }
   $("p-sendbtn")?.addEventListener("click", sendIt);
   $("p-attach")?.addEventListener("click", () => imgInput.click());
+  // The emoji picker: insert at the caret, never forcing focus (summoning
+  // the iOS keyboard from a picker tap is worse than losing the caret).
+  $("p-emoji")?.addEventListener("click", (e) => {
+    e.stopPropagation(); // the outside-click closer must not eat the popover
+    const el = e.currentTarget as HTMLElement;
+    if (document.querySelector(".emojipop")) { closeEmojiPops(); return; }
+    openEmojiPop(el, (g) => {
+      const t = $("p-send") as HTMLTextAreaElement | null;
+      if (!t) return;
+      const wasFocused = document.activeElement === t;
+      t.setRangeText(g, t.selectionStart ?? t.value.length, t.selectionEnd ?? t.value.length, "end");
+      autosize(t);
+      if (wasFocused) t.focus();
+    });
+  });
   $("p-imgx")?.addEventListener("click", () => { pendingImg = null; render(); });
   $("p-filex")?.addEventListener("click", () => { pendingFile = null; render(); });
+
+  // One toggle path for reactions, shared by chips and pickers: read the
+  // current state off the message (not the DOM class), send add/remove.
+  const doReact = (s: string, q: number, e: string) => {
+    const list = activeDm ? activeDm.msgs : portal.msgs;
+    const m = list.find((x) => x.sender === s && x.q === q);
+    const on = !m?.re?.get(e)?.has(portal.peerId);
+    if (activeDm && activeRoom) void portal.reactDm(activeRoom, { sender: s, q }, e, on);
+    else void portal.react({ sender: s, q }, e, on);
+  };
+  const openReactPicker = (at: HTMLElement | { x: number; y: number }, s: string, q: number) => {
+    openEmojiPop(at, (g) => doReact(s, q, g), true);
+  };
+
   const box = $("p-msgs");
   if (box) {
     box.scrollTop = box.scrollHeight;
+    // Long-press state: the timer drives the touch react picker; a fired
+    // long-press suppresses the trailing click (so the tapped image under
+    // the finger doesn't also open full-size).
+    let lpTimer = 0, lpX = 0, lpY = 0, lpFiredAt = 0;
+    const cancelLp = () => { if (lpTimer) { clearTimeout(lpTimer); lpTimer = 0; } };
+    const targetOf = (el: Element): { s: string; q: number } | null => {
+      const host = el.closest(".msg");
+      const s = host?.getAttribute("data-s") ?? "";
+      if (!s) return null;
+      return { s, q: Number(host!.getAttribute("data-q")) || 0 };
+    };
     // Click a shared file chip to download it — decoded and re-blobbed
     // here, inside the gesture, so no content ever renders inline.
     // Click a shared image to view it full size. The window opens
     // synchronously (popup blockers) and gets a blob URL once decoded.
+    // Click a reaction chip to toggle it; the ☺ corner button opens the
+    // react picker.
     box.addEventListener("click", (e) => {
+      if (Date.now() - lpFiredAt < 600) return; // long-press already acted
+      const rb = (e.target as Element).closest("button.react");
+      if (rb) {
+        const t = targetOf(rb);
+        if (t) doReact(t.s, t.q, rb.getAttribute("data-e")!);
+        return;
+      }
+      const ob = (e.target as Element).closest("button.reactbtn") as HTMLElement | null;
+      if (ob) {
+        e.stopPropagation();
+        const t = targetOf(ob);
+        if (t) openReactPicker(ob, t.s, t.q);
+        return;
+      }
       const fb = (e.target as Element).closest("button.msgfile");
       if (fb) {
         const f = fileById.get(fb.getAttribute("data-fid") ?? "");
@@ -2145,6 +2415,32 @@ function render() {
         })
         .catch(() => w?.close());
     });
+    // Right-click a bubble reacts (the native menu stands down); Android
+    // and iOS ≥13 also fire contextmenu on long-press, but a pointer
+    // timer is the reliable touch path — and it shows mid-press.
+    box.addEventListener("contextmenu", (e) => {
+      const t = targetOf(e.target as Element);
+      if (!t) return;
+      e.preventDefault();
+      openReactPicker({ x: e.clientX, y: e.clientY }, t.s, t.q);
+    });
+    box.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse") return; // hover button + right-click cover mice
+      const t = targetOf(e.target as Element);
+      if (!t) return;
+      lpX = e.clientX; lpY = e.clientY;
+      cancelLp();
+      lpTimer = window.setTimeout(() => {
+        lpTimer = 0;
+        lpFiredAt = Date.now();
+        openReactPicker({ x: lpX, y: lpY }, t.s, t.q);
+      }, 450);
+    });
+    box.addEventListener("pointermove", (e) => {
+      if (lpTimer && (Math.abs(e.clientX - lpX) > 10 || Math.abs(e.clientY - lpY) > 10)) cancelLp();
+    });
+    box.addEventListener("pointerup", cancelLp);
+    box.addEventListener("pointercancel", cancelLp);
     // Drag-and-drop targets the messages pane (document-level handlers
     // below stop the browser from navigating to the dropped file).
     box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("dropglow"); });
@@ -2234,7 +2530,7 @@ window.addEventListener("pagehide", () => {
 });
 
 // Console hook for e2e/debugging (same spirit as __ohPortal).
-(window as any).__ohImg = { pickImage, pickFile, fileToImagePayload, parseChatBody, mailFits, triggerFileDownload, pending: () => pendingImg, pendingFile: () => pendingFile };
+(window as any).__ohImg = { pickImage, pickFile, fileToImagePayload, parseChatBody, mailFits, triggerFileDownload, validEmoji, pending: () => pendingImg, pendingFile: () => pendingFile };
 // Liveness e2e hook: frame kinds (to forge/craft sealed frames) and the
 // liveness tunables already sit on __ohPortal as fields.
 (window as any).__ohLive = { KIND };

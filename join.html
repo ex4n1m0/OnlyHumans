@@ -14,7 +14,7 @@
 <meta property="og:description" content="Type your own word and only your people can find you. Sealed end-to-end — no accounts, no servers reading your words.">
 <meta property="og:image" content="https://onlyhumans.deepflux.space/logo.png">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="preload" as="script" href="/join-assets/portal-3E6VYGSV.js">
+<link rel="preload" as="script" href="/join-assets/portal-GXQUOAVS.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -288,6 +288,38 @@
   .composer .attach:hover { color: var(--teal); }
   .messages.dropglow { outline: 2px dashed var(--teal-dim); outline-offset: -6px; }
 
+  /* reactions + emoji picker (docs/emoji-study.md) */
+  .msg { position: relative; }
+  /* long-press react vs iOS text selection: bubbles give up selection on
+     touch only — desktop text stays selectable (copy included) */
+  @media (hover: none) {
+    .msg, .msg * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  }
+  .reactbtn { position: absolute; top: -9px; right: -4px; display: none; width: 24px; height: 24px;
+              border-radius: 50%; background: var(--panel); border: 1px solid #24404b; color: var(--muted);
+              font-size: 13px; line-height: 1; cursor: pointer; align-items: center; justify-content: center;
+              padding: 0; z-index: 2; }
+  .msg:hover .reactbtn { display: inline-flex; }
+  .reactbtn:hover { color: var(--teal); border-color: var(--teal); background: var(--panel); }
+  .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .reactions .react { display: inline-flex; align-items: center; gap: 5px; background: rgba(125,175,190,.09);
+                      border: 1px solid transparent; border-radius: 999px; padding: 2px 8px 2px 6px;
+                      font-size: 14px; line-height: 1.35; cursor: pointer; color: inherit; }
+  .reactions .react:hover { border-color: #2a4a56; }
+  .reactions .react.mine { border-color: var(--teal-dim); background: rgba(56,197,218,.14); }
+  .reactions .react .re-n { font-size: 11px; color: var(--muted); }
+  .msg.hasimg .reactions { padding: 2px 4px 4px; }
+  .emojipop { position: fixed; z-index: 70; background: var(--panel); border: 1px solid #1f3038; border-radius: 12px;
+              padding: 6px; width: 304px; max-width: calc(100vw - 16px); max-height: 264px; overflow-y: auto;
+              box-shadow: 0 10px 34px rgba(0,0,0,.55); }
+  .emojipop .eg-cat { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+                      margin: 8px 6px 2px; }
+  .emojipop .eg-row { display: flex; flex-wrap: wrap; gap: 1px; }
+  .emojipop .eg { background: none; border: none; color: inherit; font-size: 19px; line-height: 1.15;
+                  padding: 4px 5px; border-radius: 8px; cursor: pointer; }
+  .emojipop .eg:hover { background: var(--panel-2); }
+  .emojipop .eg.big { font-size: 23px; }
+
   input, button, textarea {
     background: #1a2a33; color: var(--text); border: 1px solid #24373f;
     border-radius: 6px; padding: 7px 10px; font-size: 13px; outline: none;
@@ -362,6 +394,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-3E6VYGSV.js" defer></script>
+<script src="/join-assets/portal-GXQUOAVS.js" defer></script>
 </body>
 </html>
