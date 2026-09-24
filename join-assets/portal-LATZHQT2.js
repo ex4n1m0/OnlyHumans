@@ -11,6 +11,7 @@
     <div class="${o} in" ${h}>${i}${n}${r}${e}${a}${c}</div>`}var cs=document.title;function Wh(){let t=[...v.dms.values()].reduce((e,n)=>e+n.unread,0);document.title=t?`(${t}) ${cs}`:cs}function Fn(){try{let t=JSON.parse(localStorage.getItem("oh-portal-remember")??"null");return!t||typeof t!="object"?{on:!1,name:"",last:"",rooms:[]}:{on:t.on===!0,name:typeof t.name=="string"?t.name:"",last:typeof t.last=="string"?t.last:"",rooms:Array.isArray(t.rooms)?t.rooms.filter(e=>typeof e=="string").slice(0,8):[]}}catch{return{on:!1,name:"",last:"",rooms:[]}}}function Es(t,e,n){if(!t){localStorage.removeItem("oh-portal-remember");return}let r=Fn(),i=[n,...r.rooms.filter(o=>o!==n)].slice(0,8);localStorage.setItem("oh-portal-remember",JSON.stringify({on:!0,name:e,last:n,rooms:i}))}function q(){let t=_("app");if(Wh(),Hn==="gate"){let A=Fn();t.innerHTML=`
       <div class="gate">
         <div class="gate-inner">
+          <p class="gate-top">Private Chat Rooms</p>
           <img class="gate-logo" src="/icon-256.png" alt="">
           <h2>Every Word is a Key</h2>
           <div class="gaterow">

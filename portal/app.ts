@@ -1890,6 +1890,7 @@ function render() {
     root.innerHTML = `
       <div class="gate">
         <div class="gate-inner">
+          <p class="gate-top">Private Chat Rooms</p>
           <img class="gate-logo" src="/icon-256.png" alt="">
           <h2>Every Word is a Key</h2>
           <div class="gaterow">
