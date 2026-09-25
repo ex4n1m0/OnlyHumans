@@ -12,7 +12,7 @@
       <div class="gate">
         <div class="gate-inner">
           <p class="gate-top">${v(g("gate.top"))}</p>
-          <img class="gate-logo" src="/icon-256.png" alt="">
+          <img class="gate-logo" src="/icon-256.png?v=2" alt="">
           <h2>${v(g("gate.slogan"))}</h2>
           <div class="gaterow">
             <input id="p-name" placeholder="${v(g("gate.namePh"))}" maxlength="32" autocomplete="off" spellcheck="false" value="${v(A.on?A.name:"")}">
@@ -32,7 +32,7 @@
         </div>
       </div>`;let m=L("p-word");L("p-join")?.addEventListener("click",()=>{$i()}),L("p-name").addEventListener("keydown",f=>{f.key==="Enter"&&$i()}),m.addEventListener("keydown",f=>{f.key==="Enter"&&$i()}),L("p-lang")?.addEventListener("click",()=>rs(Be==="zh"?"en":"zh"));return}let e=tt?S.dms.get(tt)??null:null,n=A=>S.displayName(A),r=L("p-send"),i=r?{value:r.value,focused:document.activeElement===r}:null,o=L("pf-name"),s=L("pf-bio"),a=o?{name:o.value,bio:s?.value??"",focusName:document.activeElement===o,focusBio:document.activeElement===s}:null,c=S.peerId||"",h=[...S.members].filter(([A])=>A!==c),l=S.members.size||1;if(t.innerHTML=`
     <header class="cmdbar">
-      <img class="brandlogo" src="/icon-256.png" alt="">
+      <img class="brandlogo" src="/icon-256.png?v=2" alt="">
       <span class="logo">OnlyHumans</span>
       <span class="roomchip" id="p-roomchip" role="button" tabindex="0" aria-haspopup="menu"
             title="${v(g("cmd.switchRoom"))}">

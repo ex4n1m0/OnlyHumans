@@ -2219,7 +2219,7 @@ function render() {
       <div class="gate">
         <div class="gate-inner">
           <p class="gate-top">${esc(t("gate.top"))}</p>
-          <img class="gate-logo" src="/icon-256.png" alt="">
+          <img class="gate-logo" src="/icon-256.png?v=2" alt="">
           <h2>${esc(t("gate.slogan"))}</h2>
           <div class="gaterow">
             <input id="p-name" placeholder="${esc(t("gate.namePh"))}" maxlength="32" autocomplete="off" spellcheck="false" value="${esc(rem.on ? rem.name : "")}">
@@ -2274,7 +2274,7 @@ function render() {
   const memberCount = portal.members.size || 1;
   root.innerHTML = `
     <header class="cmdbar">
-      <img class="brandlogo" src="/icon-256.png" alt="">
+      <img class="brandlogo" src="/icon-256.png?v=2" alt="">
       <span class="logo">OnlyHumans</span>
       <span class="roomchip" id="p-roomchip" role="button" tabindex="0" aria-haspopup="menu"
             title="${esc(t("cmd.switchRoom"))}">
