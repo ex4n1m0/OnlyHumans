@@ -348,7 +348,15 @@ const STR: Record<Lang, Record<string, string>> = {
   },
 };
 
+// Resolution order matches the landing: ?lang= deep link → stored choice
+// → browser language → English. A deep link is a choice, so it persists
+// (/join?lang=zh and /join?lang=zh#room=词 invites arrive fully Chinese).
 let LANG: Lang = (() => {
+  const q = new URLSearchParams(location.search).get("lang");
+  if (q === "zh" || q === "en") {
+    try { localStorage.setItem("oh-lang", q); } catch { /* private mode */ }
+    return q;
+  }
   try {
     const s = localStorage.getItem("oh-lang");
     if (s === "zh" || s === "en") return s;
