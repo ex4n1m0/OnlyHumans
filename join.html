@@ -19,7 +19,7 @@
 <meta property="og:image:alt" content="OnlyHumans — private chat rooms in any browser. Every word is a key.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://onlyhumans.deepflux.space/og-image.png?v=3">
-<link rel="preload" as="script" href="/join-assets/portal-HNXNL4LE.js">
+<link rel="preload" as="script" href="/join-assets/portal-RK7AX47L.js">
 <style>
   /* Design system adopted from the desktop app (src/app.css) so the
      portal and the app read as one product. */
@@ -46,6 +46,22 @@
     /* type scale (12px floor) · radius */
     --fs-xs: 12px; --fs-s: 13px; --fs-m: 14px; --fs-l: 16px;
     --r-card: 8px; --r-pill: 999px; --r-input: 6px;
+    /* swappable surface/accent roles (tokenized so the red theme can
+       re-tint them; violet/green/amber/red keep their frozen meanings) */
+    --hover: #17262f; --panel-3: #1d313c; --edge: #24404b; --edge-2: #2a4a56;
+    --picker-bg: #1a2a33; --picker-line: #24373f; --btn-hover: #213542;
+    --faint: #56707c; --accent-text: #bff3fa; --text-bright: #eafcff;
+    --react-bg: rgba(125,175,190,.09);
+  }
+  /* red theme — set on <html data-theme="red"> by the portal bundle from
+     the shared oh-theme key (the landing's dropdown writes it) */
+  html[data-theme="red"] {
+    --bg: #150a0e; --panel: #251218; --panel-2: #1c0e13; --line: #3d2129;
+    --teal: #f47ba0; --teal-dim: #6e2740;
+    --hover: #2e161e; --panel-3: #331923; --edge: #4b2530; --edge-2: #5a2c39;
+    --picker-bg: #2b151c; --picker-line: #402028; --btn-hover: #3a1c25;
+    --faint: #8a626c; --accent-text: #ffd3e0; --text-bright: #ffe9f0;
+    --react-bg: rgba(244,123,160,.10);
   }
 
   :focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
@@ -72,7 +88,7 @@
     display: flex; align-items: center; gap: 10px;
     padding: 10px 14px;
     background: var(--panel);
-    border-bottom: 1px solid #1f3038;
+    border-bottom: 1px solid var(--line);
   }
   header.cmdbar .brandlogo { width: 20px; height: 20px; border-radius: 5px; flex-shrink: 0; }
   header.cmdbar .logo { font-weight: 700; letter-spacing: .04em; color: var(--teal); white-space: nowrap; }
@@ -131,7 +147,7 @@
   main { flex: 1; display: flex; min-height: 0; overflow: hidden; }
   .sidebar {
     width: 230px; background: var(--panel-2);
-    border-right: 1px solid #1f3038; display: flex; flex-direction: column;
+    border-right: 1px solid var(--line); display: flex; flex-direction: column;
     overflow: hidden; min-height: 0; flex-shrink: 0;
   }
   .side-label { font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
@@ -144,14 +160,14 @@
             position: relative; overflow: hidden; }
   .avatar img { position: absolute; inset: 0; width: 100%; height: 100%;
                 object-fit: cover; }
-  .avatar.roomavatar { background: var(--teal-dim); color: #bff3fa; }
+  .avatar.roomavatar { background: var(--teal-dim); color: var(--accent-text); }
 
   .member-list { list-style: none; flex: 1; min-height: 0; overflow-y: auto; }
   .member-list li {
     display: flex; align-items: center; gap: 10px; padding: 6px 10px; margin: 1px 6px;
     border-radius: 8px; border: 1px solid transparent;
   }
-  .member-list li:hover { background: #17262f; }
+  .member-list li:hover { background: var(--hover); }
   .member-list li.ishost .avatar { outline: 2px solid var(--teal); outline-offset: 1px; }
   .member-list .li-body { flex: 1; min-width: 0; }
   .member-list .mname { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
@@ -165,10 +181,10 @@
     border-radius: 999px; border: 1px solid var(--teal-dim); background: transparent;
     color: var(--teal); font-size: 12px; font-weight: 500; line-height: 1; cursor: pointer;
   }
-  .member-list li .dm-btn:hover { color: #eafcff; border-color: var(--teal); background: var(--teal-dim); }
+  .member-list li .dm-btn:hover { color: var(--text-bright); border-color: var(--teal); background: var(--teal-dim); }
   .member-list.dm-list { flex: 0 1 auto; }
   li.dmrow { cursor: pointer; }
-  li.dmrow.active { background: #17262f; box-shadow: inset 2px 0 0 var(--teal); }
+  li.dmrow.active { background: var(--hover); box-shadow: inset 2px 0 0 var(--teal); }
   .unread-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); flex-shrink: 0; }
   .pp-pill { font-size: 10px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--teal-dim);
              color: var(--teal); font-weight: 500; margin-left: 8px; white-space: nowrap; }
@@ -198,7 +214,7 @@
   .chat { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   .chat .titlebar {
     padding: 10px 16px; background: var(--panel);
-    border-bottom: 1px solid #1f3038; display: flex; gap: 12px; align-items: center;
+    border-bottom: 1px solid var(--line); display: flex; gap: 12px; align-items: center;
   }
   .tb-body { flex: 1; min-width: 0; }
   .tb-title { font-weight: 700; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px; }
@@ -208,7 +224,7 @@
     border: 1px solid var(--teal-dim); background: transparent; color: var(--teal);
     font-size: var(--fs-s); font-weight: 600; padding: 6px 12px; border-radius: var(--r-input);
   }
-  .tb-actions .btn-ghost:hover { background: var(--teal-dim); color: #eafcff; }
+  .tb-actions .btn-ghost:hover { background: var(--teal-dim); color: var(--text-bright); }
   /* Mobile home of the member list (the sidebar is folded away on
      phones): desktop keeps it hidden to avoid duplicating the sidebar. */
   .members-btn { display: none; }
@@ -216,8 +232,8 @@
   .sender { font-size: var(--fs-xs); font-weight: 600; margin: 6px 0 -3px 4px; align-self: flex-start; }
   .msg.out + .sender, .msg.in + .sender { margin-top: 8px; }
   .msg { max-width: 70%; padding: 7px 11px; border-radius: 10px; white-space: pre-wrap; word-break: break-word; }
-  .msg.out { align-self: flex-end; background: var(--teal-dim); color: #eafcff; }
-  .msg.in { align-self: flex-start; background: #1d313c; }
+  .msg.out { align-self: flex-end; background: var(--teal-dim); color: var(--text-bright); }
+  .msg.in { align-self: flex-start; background: var(--panel-3); }
   .msg .meta { font-size: 11px; color: var(--muted); margin-top: 3px; }
   .viasite { color: var(--teal); cursor: help; }
   .narration {
@@ -238,7 +254,7 @@
              font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
              font-size: 11px; color: var(--muted); text-align: left; }
   .cl-row { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
-  .cl-row .cl-ts { color: #56707c; flex-shrink: 0; }
+  .cl-row .cl-ts { color: var(--faint); flex-shrink: 0; }
   .cl-row.ok { color: #7fd8a4; }
   .cl-row.warn { color: var(--amber); }
   .connhint { color: var(--muted); font-size: 12px; max-width: 42ch; }
@@ -248,7 +264,7 @@
           border-top-color: var(--teal); display: inline-block;
           animation: ohspin 1s linear infinite; }
   @keyframes ohspin { to { transform: rotate(360deg); } }
-  .composer { display: flex; gap: 8px; padding: 10px; background: var(--panel); border-top: 1px solid #1f3038; align-items: flex-end; }
+  .composer { display: flex; gap: 8px; padding: 10px; background: var(--panel); border-top: 1px solid var(--line); align-items: flex-end; }
   .composer textarea {
     flex: 1; resize: none; min-height: 35px; max-height: 132px;
     line-height: 1.4; overflow-y: auto;
@@ -262,18 +278,18 @@
   .msg.hasimg .meta { padding: 2px 6px 3px; }
   .msgimg { display: block; max-width: 100%; max-height: 240px; border-radius: 8px;
             cursor: zoom-in; margin-top: 4px; }
-  .msg.hasimg:not(.out) .msgimg, .msg.out .msgimg { background: #1d313c; }
+  .msg.hasimg:not(.out) .msgimg, .msg.out .msgimg { background: var(--panel-3); }
   .msgfile { display: flex; align-items: center; gap: 9px; width: 100%; margin-top: 4px;
-             padding: 8px 10px; background: #1d313c; border: 1px solid var(--line);
+             padding: 8px 10px; background: var(--panel-3); border: 1px solid var(--line);
              border-radius: 8px; text-align: left; }
-  .msgfile:hover { border-color: var(--teal); background: #1d313c; }
+  .msgfile:hover { border-color: var(--teal); background: var(--panel-3); }
   .mf-icon { flex-shrink: 0; display: inline-flex; color: var(--teal); }
   .mf-icon svg { width: 18px; height: 18px; }
   .mf-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .mf-name { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mf-meta { font-size: 11px; color: var(--muted); }
   .imgqueue { display: flex; align-items: center; gap: 10px; padding: 8px 12px;
-              background: var(--panel); border-top: 1px solid #1f3038; }
+              background: var(--panel); border-top: 1px solid var(--line); }
   .imgqueue .spin { flex-shrink: 0; }
   .iq-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 7px;
               border: 1px solid var(--line); flex-shrink: 0; }
@@ -300,20 +316,20 @@
     .msg, .msg * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   }
   .reactbtn { position: absolute; top: -9px; right: -4px; display: none; width: 24px; height: 24px;
-              border-radius: 50%; background: var(--panel); border: 1px solid #24404b; color: var(--muted);
+              border-radius: 50%; background: var(--panel); border: 1px solid var(--edge); color: var(--muted);
               font-size: 13px; line-height: 1; cursor: pointer; align-items: center; justify-content: center;
               padding: 0; z-index: 2; }
   .msg:hover .reactbtn { display: inline-flex; }
   .reactbtn:hover { color: var(--teal); border-color: var(--teal); background: var(--panel); }
   .reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-  .reactions .react { display: inline-flex; align-items: center; gap: 5px; background: rgba(125,175,190,.09);
+  .reactions .react { display: inline-flex; align-items: center; gap: 5px; background: var(--react-bg);
                       border: 1px solid transparent; border-radius: 999px; padding: 2px 8px 2px 6px;
                       font-size: 14px; line-height: 1.35; cursor: pointer; color: inherit; }
-  .reactions .react:hover { border-color: #2a4a56; }
+  .reactions .react:hover { border-color: var(--edge-2); }
   .reactions .react.mine { border-color: var(--teal-dim); background: rgba(56,197,218,.14); }
   .reactions .react .re-n { font-size: 11px; color: var(--muted); }
   .msg.hasimg .reactions { padding: 2px 4px 4px; }
-  .emojipop { position: fixed; z-index: 70; background: var(--panel); border: 1px solid #1f3038; border-radius: 12px;
+  .emojipop { position: fixed; z-index: 70; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
               padding: 6px; width: 304px; max-width: calc(100vw - 16px); max-height: 264px; overflow-y: auto;
               box-shadow: 0 10px 34px rgba(0,0,0,.55); }
   .emojipop .eg-cat { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
@@ -325,14 +341,14 @@
   .emojipop .eg.big { font-size: 23px; }
 
   input, button, textarea {
-    background: #1a2a33; color: var(--text); border: 1px solid #24373f;
+    background: var(--picker-bg); color: var(--text); border: 1px solid var(--picker-line);
     border-radius: 6px; padding: 7px 10px; font-size: 13px; outline: none;
     font-family: inherit;
   }
   input:focus, textarea:focus { border-color: var(--teal); }
   button { cursor: pointer; }
-  button:hover { background: #213542; }
-  button.primary { background: var(--teal-dim); border-color: var(--teal-dim); color: #eafcff; }
+  button:hover { background: var(--btn-hover); }
+  button.primary { background: var(--teal-dim); border-color: var(--teal-dim); color: var(--text-bright); }
   button.primary:hover { background: var(--teal); }
 
   /* absolute, not fixed: anchored inside the fitted #app shell so an
@@ -367,11 +383,11 @@
              text-align: left; cursor: pointer; }
   .gaterem input { width: auto; flex-shrink: 0; accent-color: var(--teal); }
   .gatehint { color: var(--danger); font-size: .85rem; margin-top: .4rem; }
-  .gatebuild { color: #56707c; font-size: 10px; letter-spacing: .06em; margin-top: .8rem; user-select: none; }
+  .gatebuild { color: var(--faint); font-size: 10px; letter-spacing: .06em; margin-top: .8rem; user-select: none; }
   /* quiet language toggle under the build line — shows the language you'd
      switch to (English ↔ 简体中文), writes the shared oh-lang key */
   .gatelang { background: none; border: 0; padding: 0; margin-top: .3rem;
-              color: #56707c; font-size: 10px; letter-spacing: .06em; cursor: pointer; }
+              color: var(--faint); font-size: 10px; letter-spacing: .06em; cursor: pointer; }
   .gatelang:hover { color: var(--teal); }
 
   /* phones: keep the single-column chat, fold the chrome away, and keep
@@ -408,6 +424,6 @@
 </head>
 <body>
 <div id="app"></div>
-<script src="/join-assets/portal-HNXNL4LE.js" defer></script>
+<script src="/join-assets/portal-RK7AX47L.js" defer></script>
 </body>
 </html>

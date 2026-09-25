@@ -183,6 +183,9 @@ const STR: Record<Lang, Record<string, string>> = {
     "menu.lang": "Language / 语言",
     "menu.langHintEn": "switch to 简体中文",
     "menu.langHintZh": "切换到 English",
+    "menu.theme": "Theme",
+    "menu.themeHintBlue": "switch to Red",
+    "menu.themeHintRed": "switch to Blue",
     "menu.warpQ": "warp to universe {n}?",
     "menu.warpGo": "✦ Warp",
     "menu.warpHint": "everyone here moves to a new key; the word founds a fresh room for newcomers",
@@ -327,6 +330,9 @@ const STR: Record<Lang, Record<string, string>> = {
     "menu.lang": "语言 / Language",
     "menu.langHintEn": "切换到简体中文",
     "menu.langHintZh": "切换到 English",
+    "menu.theme": "主题",
+    "menu.themeHintBlue": "切换到红色",
+    "menu.themeHintRed": "切换到蓝色",
     "menu.warpQ": "跃迁到宇宙 {n}？",
     "menu.warpGo": "✦ 跃迁",
     "menu.warpHint": "这里的所有人换用新密钥；该词将为后来者另开一间新房间",
@@ -367,6 +373,22 @@ let LANG: Lang = (() => {
 function setLang(lang: Lang) {
   LANG = lang;
   try { localStorage.setItem("oh-lang", lang); } catch { /* fine */ }
+  render();
+}
+
+// Theme — one shared key with the landing (oh-theme, "blue"|"red").
+// Applied to <html> before the first render so the token overrides in
+// join.html recolor everything with no flash; blue is the absence of a value.
+let THEME: "blue" | "red" = (() => {
+  try { if (localStorage.getItem("oh-theme") === "red") return "red"; } catch { /* fine */ }
+  return "blue";
+})();
+document.documentElement.dataset.theme = THEME;
+function setTheme(theme: "blue" | "red") {
+  THEME = theme;
+  if (theme === "red") document.documentElement.dataset.theme = "red";
+  else delete document.documentElement.dataset.theme;
+  try { localStorage.setItem("oh-theme", theme); } catch { /* fine */ }
   render();
 }
 
@@ -543,7 +565,7 @@ async function fileToImagePayload(file: Blob, budget = IMG_BUDGET, edges: number
     ctx.imageSmoothingQuality = "high";
     // JPEG has no alpha: flatten onto the inbound bubble colour so
     // transparent PNGs don't turn black.
-    ctx.fillStyle = "#1d313c";
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--panel-3").trim() || "#1d313c";
     ctx.fillRect(0, 0, w, h);
     ctx.drawImage(bmp, 0, 0, w, h);
     for (const q of [0.75, 0.62, 0.5, 0.4]) {
@@ -2454,6 +2476,11 @@ function render() {
         label: t("menu.lang"),
         hint: LANG === "zh" ? t("menu.langHintZh") : t("menu.langHintEn"),
         act: () => setLang(LANG === "zh" ? "en" : "zh"),
+      },
+      {
+        label: t("menu.theme"),
+        hint: THEME === "red" ? t("menu.themeHintRed") : t("menu.themeHintBlue"),
+        act: () => setTheme(THEME === "red" ? "blue" : "red"),
       },
       { label: t("menu.browserLine", { b: BROWSER }), header: true },
     ]);

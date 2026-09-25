@@ -45,6 +45,19 @@
        Chinese has no italics, so the em renders upright there */
     --serif-zh: Georgia, "Source Han Serif SC", "Noto Serif CJK SC",
                 "Songti SC", "SimSun", serif;
+    --accent-rgb: 86, 197, 218;
+    --bg-2: #0b0f16;
+  }
+  /* red theme — same structure, reds instead of blues: dark red base,
+     pink accent for contrast (picked from the dropdown, stored in oh-theme,
+     applied pre-paint by the inline script below so there is no flash) */
+  html[data-theme="red"] {
+    --bg: #0c0508;
+    --bg-2: #170a0f;
+    --accent: #f47ba0;
+    --accent-deep: #b23a5e;
+    --accent-ink: #2b0812;
+    --accent-rgb: 244, 123, 160;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
@@ -52,7 +65,7 @@
   body {
     font-family: var(--sans); color: var(--ink); line-height: 1.65;
     background:
-      radial-gradient(ellipse 65% 40% at 50% -8%, rgba(86,197,218,.08), transparent 60%),
+      radial-gradient(ellipse 65% 40% at 50% -8%, rgba(var(--accent-rgb), .08), transparent 60%),
       var(--bg);
   }
   ::selection { background: var(--accent-deep); color: #fff; }
@@ -74,8 +87,8 @@
     transition: transform .12s ease, box-shadow .12s ease;
   }
   .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent-deep));
-                 color: var(--accent-ink); box-shadow: 0 6px 26px rgba(86,197,218,.3); }
-  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 34px rgba(86,197,218,.38); }
+                 color: var(--accent-ink); box-shadow: 0 6px 26px rgba(var(--accent-rgb), .3); }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 34px rgba(var(--accent-rgb), .38); }
   .btn-primary:active { transform: translateY(0); }
 
   /* sibling-projects strip — above the sticky nav, scrolls away */
@@ -139,7 +152,7 @@
   .lang-list {
     position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
     min-width: 148px; padding: 4px;
-    background: #0b0f16; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
     display: flex; flex-direction: column; gap: 1px;
   }
@@ -154,6 +167,14 @@
   .lang-list button[aria-checked="true"] { color: var(--accent); }
   .lang-list button[aria-checked="true"]::before { content: "✓"; font-size: .75rem; }
   .lang-list button:not([aria-checked="true"])::before { content: "✓"; visibility: hidden; }
+  /* theme menu reuses the lang-menu classes; the button face is a color
+     swatch instead of a code, items carry their own color dots */
+  .lang-btn .swatch { width: 12px; height: 12px; border-radius: 50%;
+                      background: var(--accent); border: 1px solid rgba(236, 233, 226, .25); }
+  .lang-list button .dot { display: inline-block; width: 10px; height: 10px;
+                            border-radius: 50%; margin-right: .45rem; vertical-align: -1px; }
+  .dot-blue { background: #56c5da; }
+  .dot-red { background: #f47ba0; }
 
   /* hero — logo on top, centered */
   .hero {
@@ -164,7 +185,7 @@
   .hero-logo {
     width: min(72vw, clamp(260px, 32vw, 500px)); height: auto; aspect-ratio: 1;
     border-radius: 23%;
-    box-shadow: 0 24px 90px rgba(86,197,218,.28);
+    box-shadow: 0 24px 90px rgba(var(--accent-rgb), .28);
   }
   .hero h1 {
     font-size: clamp(2rem, 1.3rem + 2.4vw, 3.7rem);
@@ -228,7 +249,7 @@
   .crypto p { color: var(--ink-soft); font-size: .92rem; }
   .crypto strong { color: #fff; }
   .crypto code { font-family: ui-monospace, Consolas, monospace; font-size: .84em;
-                 color: var(--accent); background: rgba(86,197,218,.07);
+                 color: var(--accent); background: rgba(var(--accent-rgb), .07);
                  padding: .1em .38em; border-radius: 5px; }
 
   footer.site { border-top: 1px solid rgba(236,233,226,.05); margin-top: 3.6rem;
@@ -236,6 +257,7 @@
   footer .slogan { color: var(--ink-soft); margin-bottom: .6rem; }
   footer .meta { color: var(--muted); font-size: .8rem; line-height: 1.8; }
 </style>
+  <script>try{if(localStorage.getItem("oh-theme")==="red")document.documentElement.dataset.theme="red"}catch(e){}</script>
 </head>
 <body>
 <a class="skip-link" href="#how-it-works" data-i18n="skip">Skip to content</a>
@@ -274,6 +296,16 @@
       <div class="lang-list" id="lang-list" role="menu" aria-label="Language / 语言" hidden>
         <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
         <button type="button" role="menuitemradio" data-lang="zh" aria-checked="false">简体中文</button>
+      </div>
+    </div>
+    <div class="lang-menu">
+      <button class="lang-btn" id="theme-btn" type="button" aria-haspopup="menu"
+              aria-expanded="false" aria-label="Theme / 主题">
+        <span class="swatch" aria-hidden="true"></span><span class="caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="lang-list" id="theme-list" role="menu" aria-label="Theme / 主题" hidden>
+        <button type="button" role="menuitemradio" data-theme="blue" aria-checked="true"><span class="dot dot-blue" aria-hidden="true"></span><span data-i18n="theme.blue">Blue</span></button>
+        <button type="button" role="menuitemradio" data-theme="red" aria-checked="false"><span class="dot dot-red" aria-hidden="true"></span><span data-i18n="theme.red">Red</span></button>
       </div>
     </div>
   </div>
@@ -492,6 +524,8 @@
       "doc.title": ["OnlyHumans — Every Word is a Key", "OnlyHumans — 每个词都是一把钥匙"],
       "meta.desc": ["Private chat without accounts. Choose a name and a shared word — end-to-end encrypted, in any browser. The word never leaves your device.", "无需账号的私密聊天。选一个名字，共享一个词——端到端加密，任何浏览器都行。这个词永远不会离开你的设备。"],
       "og.desc": ["Private chat in your browser — no accounts, no servers reading your words.", "在浏览器里私密聊天——无账号，服务器读不到你说的任何一句话。"],
+      "theme.blue": ["Blue", "蓝色"],
+      "theme.red": ["Red", "红色"],
       "og.alt": ["OnlyHumans — private chat rooms in any browser. Every word is a key.", "OnlyHumans——任何浏览器里的私密聊天室。每个词都是一把钥匙。"],
       "og.image": ["https://onlyhumans.deepflux.space/og-image.png?v=3", "https://onlyhumans.deepflux.space/og-image-zh.png"]
     };
@@ -564,6 +598,45 @@
     });
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && !list.hidden) setOpen(false);
+    });
+
+    // Theme — same dropdown pattern as language. Blue is the default and
+    // needs no attribute (the red overrides hang off html[data-theme="red"]).
+    function applyTheme(theme, persist) {
+      THEME = theme === "red" ? "red" : "blue";
+      if (THEME === "red") document.documentElement.dataset.theme = "red";
+      else delete document.documentElement.dataset.theme;
+      var opts = document.querySelectorAll("#theme-list button");
+      for (var o = 0; o < opts.length; o++)
+        opts[o].setAttribute("aria-checked", opts[o].getAttribute("data-theme") === THEME ? "true" : "false");
+      if (persist) { try { localStorage.setItem("oh-theme", THEME); } catch (e) {} }
+    }
+    var THEME = "blue";
+    var storedTheme = null;
+    try { storedTheme = localStorage.getItem("oh-theme"); } catch (e) {}
+    applyTheme(storedTheme === "red" ? "red" : "blue", false);
+
+    var tbtn = document.getElementById("theme-btn");
+    var tlist = document.getElementById("theme-list");
+    function setThemeOpen(open) {
+      tlist.hidden = !open;
+      tbtn.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    tbtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      setThemeOpen(tlist.hidden);
+    });
+    tlist.addEventListener("click", function (e) {
+      var b = e.target.closest("button[data-theme]");
+      if (!b) return;
+      applyTheme(b.getAttribute("data-theme"), true);
+      setThemeOpen(false);
+    });
+    document.addEventListener("click", function (e) {
+      if (!tlist.hidden && !tlist.contains(e.target) && e.target !== tbtn) setThemeOpen(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !tlist.hidden) setThemeOpen(false);
     });
 
     // Live presence — the same anonymous counter the app's green dot uses,
