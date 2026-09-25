@@ -1995,7 +1995,7 @@ const bioOf = (peer: string): string =>
   (peer === portal.peerId ? portal.bio : portal.profiles.get(peer)?.bio) || "";
 
 /** The room's titlebar glyph: the room image when a member set one, the
- *  mesh glyph otherwise. */
+ *  brand mark otherwise. */
 function roomAvatarHtml(): string {
   if (portal.roomImg.img) {
     return `<span class="avatar roomavatar"><img src="${portal.roomImg.img}" alt=""></span>`;
@@ -2003,9 +2003,7 @@ function roomAvatarHtml(): string {
   return MAIN_ROOM_ICON;
 }
 
-const MAIN_ROOM_ICON = `<span class="avatar roomavatar">
-  <svg viewBox="0 0 24 24" fill="none"><circle cx="6" cy="7" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18" cy="8.6" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="17.4" r="2.4" stroke="currentColor" stroke-width="1.6"/><path d="M8.1 7.9 15.9 8.3 M7.3 9 10.6 15.3 M17 10.3 13.9 15.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-</span>`;
+const MAIN_ROOM_ICON = `<span class="avatar roomavatar"><img src="/icon-256.png?v=2" alt=""></span>`;
 
 /** Keep the composer at one line until it genuinely needs more. */
 function autosize(el: HTMLTextAreaElement) {
