@@ -212,6 +212,11 @@
   .hero p.lede { color: var(--ink-soft); max-width: 44rem; font-size: clamp(1rem, .95rem + .25vw, 1.2rem); }
   .hero .cta { margin-top: .9rem; font-size: 1.05rem; }
   .hero .anywhere { margin-top: .4rem; color: var(--muted); font-size: .85rem; }
+  /* tall viewports: give the mark its presence back — there is room for a
+     bigger logo AND the room cards on screen one (short laptops stay compact) */
+  @media (min-height: 820px) {
+    .hero-logo { width: min(48vw, clamp(170px, 20vw, 340px)); }
+  }
   /* phones: a touch tighter still, so the room ideas start on screen one */
   @media (max-width: 560px) {
     .hero { padding: 1rem 1rem .6rem; }
