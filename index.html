@@ -221,6 +221,19 @@
   .step h3 { color: #fff; font-size: 1rem; margin: .35rem 0 .3rem; font-weight: 650; }
   .step p { color: var(--muted); font-size: .9rem; }
 
+  /* room-word seeds — 185px min gives a 5×2 grid at full width */
+  .seed-lead { color: var(--ink-soft); max-width: 36rem; margin: -.55rem 0 1.25rem; font-size: .95rem; }
+  .seeds { list-style: none; display: grid;
+           grid-template-columns: repeat(auto-fit, minmax(min(185px,100%), 1fr)); gap: .9rem; }
+  /* auto-fit drops to one tall column below ~385px — pin 2 columns on phones */
+  @media (max-width: 560px) { .seeds { grid-template-columns: repeat(2, 1fr); } }
+  .seed { background: var(--panel); border: 1px solid rgba(236,233,226,.055);
+          border-radius: 14px; padding: .95rem 1.1rem .9rem; }
+  .seed .w { font-family: ui-monospace, Consolas, monospace; font-size: 1rem;
+             color: var(--accent); word-break: break-word; }
+  .seed p { color: var(--muted); font-size: .86rem; margin-top: .18rem; line-height: 1.45; }
+  .seed-note { color: var(--muted); font-size: .84rem; margin-top: 1.1rem; max-width: 36rem; }
+
   .tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(250px,100%), 1fr)); gap: .9rem; }
   .tier { background: var(--panel); border: 1px solid rgba(236,233,226,.055);
           border-radius: 14px; padding: 1.25rem 1.3rem; }
@@ -351,6 +364,26 @@
         they can't.</p>
       </div>
     </div>
+  </section>
+
+  <section id="rooms" aria-labelledby="rooms-h">
+    <h2 class="section" id="rooms-h" data-i18n="seeds.h">Ten words, ten rooms</h2>
+    <p class="seed-lead" data-i18n="seeds.lead">Every room began as one ordinary word.
+    Borrow one of these — or invent your own.</p>
+    <ul class="seeds">
+      <li class="seed"><span class="w" data-i18n="seed1.w">treehouse</span><p data-i18n="seed1.p">the best-friends corner</p></li>
+      <li class="seed"><span class="w" data-i18n="seed2.w">harbor</span><p data-i18n="seed2.p">a hideout for love without a label</p></li>
+      <li class="seed"><span class="w" data-i18n="seed3.w">embargo</span><p data-i18n="seed3.p">your news, before it's public</p></li>
+      <li class="seed"><span class="w" data-i18n="seed4.w">ticker</span><p data-i18n="seed4.p">stock talk between trusted friends</p></li>
+      <li class="seed"><span class="w" data-i18n="seed5.w">stork</span><p data-i18n="seed5.p">the good news family hears first</p></li>
+      <li class="seed"><span class="w" data-i18n="seed6.w">campfire</span><p data-i18n="seed6.p">the friend group, gathered from anywhere</p></li>
+      <li class="seed"><span class="w" data-i18n="seed7.w">greenroom</span><p data-i18n="seed7.p">your team, before the launch</p></li>
+      <li class="seed"><span class="w" data-i18n="seed8.w">nightowl</span><p data-i18n="seed8.p">the 2 a.m. conversations</p></li>
+      <li class="seed"><span class="w" data-i18n="seed9.w">roadtrip</span><p data-i18n="seed9.p">the trip, planned together</p></li>
+      <li class="seed"><span class="w" data-i18n="seed10.w">bookshelf</span><p data-i18n="seed10.p">a tiny book club</p></li>
+    </ul>
+    <p class="seed-note" data-i18n="seeds.note">Borrow a word to look around — for a room of your
+    own, bend it until only your people would guess it.</p>
   </section>
 
   <section id="security" aria-labelledby="sec-h">
@@ -493,6 +526,29 @@
       "step2.p": ["Everyone with the same word lands in the same room. For private rooms, share an unguessable word.", "输入相同词的人会进入同一间房间。私密房间，请共享一个猜不到的词。"],
       "step3.h": ["Talk", "开始交谈"],
       "step3.p": ["Messages are sealed end-to-end and travel directly between members when possible, and sealed through the site's mailbox when they can't.", "消息经端到端密封：能直连时在成员之间直接传输，不能直连时通过站内中转邮箱密封送达。"],
+      "seeds.h": ["Ten words, ten rooms", "十个词，十间房"],
+      "seeds.lead": ["Every room began as one ordinary word. Borrow one of these — or invent your own.", "每间房间都始于一个普通的词。从这几个里借一个，或者发明你自己的。"],
+      "seed1.w": ["treehouse", "树屋"],
+      "seed1.p": ["the best-friends corner", "老朋友的角落"],
+      "seed2.w": ["harbor", "港湾"],
+      "seed2.p": ["a hideout for love without a label", "给没有名分的感情一个藏身处"],
+      "seed3.w": ["embargo", "独家"],
+      "seed3.p": ["your news, before it's public", "你的消息，在公开之前"],
+      "seed4.w": ["ticker", "涨停"],
+      "seed4.p": ["stock talk between trusted friends", "和信得过的人聊行情"],
+      "seed5.w": ["stork", "报喜"],
+      "seed5.p": ["the good news family hears first", "最先告诉家里的好消息"],
+      "seed6.w": ["campfire", "篝火"],
+      "seed6.p": ["the friend group, gathered from anywhere", "天南地北的老朋友"],
+      "seed7.w": ["greenroom", "后台"],
+      "seed7.p": ["your team, before the launch", "上线前，团队先在这里集合"],
+      "seed8.w": ["nightowl", "夜猫子"],
+      "seed8.p": ["the 2 a.m. conversations", "凌晨两点的那些话"],
+      "seed9.w": ["roadtrip", "自驾"],
+      "seed9.p": ["the trip, planned together", "一起计划下一次出发"],
+      "seed10.w": ["bookshelf", "书架"],
+      "seed10.p": ["a tiny book club", "只属于几个人的读书会"],
+      "seeds.note": ["Borrow a word to look around — for a room of your own, bend it until only your people would guess it.", "借一个词随处看看——要有自己的房间，就把它改成只有你们的人才猜得到的样子。"],
       "sec.h": ["Security in plain terms", "安全性，通俗地说"],
       "tier1.h": ["Protected", "受保护的"],
       "tier1.1": ["Message content — encrypted on your device, a key per message", "消息内容——在你的设备上加密，每条消息一把独立密钥"],
