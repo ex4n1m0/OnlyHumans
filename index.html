@@ -144,6 +144,10 @@
   @media (max-width: 560px) { .live-pills { display: none; } }
   /* the dot separator wraps to a line's end and reads as a stray mark */
   @media (max-width: 560px) { .kin-sep { display: none; } }
+  /* four links no longer fit beside the label on phones (one line needs
+     ~480px) — the label takes its own line so the names wrap once,
+     together, instead of leaving a lone link on the second line */
+  @media (max-width: 480px) { .kin-label { flex-basis: 100%; } }
 
   /* language dropdown — top-right corner, after the Join button */
   .lang-menu { position: relative; display: inline-flex; flex: 0 0 auto; }
@@ -302,6 +306,8 @@
     <a class="kin-link" href="https://n38worth.com/" target="_blank" rel="noopener" data-i18n-html="kin.2"><b>n38worth</b></a>
     <span class="kin-sep" aria-hidden="true"></span>
     <a class="kin-link" href="https://remote.deepflux.space/" target="_blank" rel="noopener" data-i18n-html="kin.3"><b>Remote</b></a>
+    <span class="kin-sep" aria-hidden="true"></span>
+    <a class="kin-link" href="https://modelswarm.deepflux.space/" target="_blank" rel="noopener" data-i18n-html="kin.4"><b>ModelSwarm</b></a>
   </div>
 </div>
 
@@ -530,6 +536,7 @@
       "kin.1": ['<b>DeepFlux</b>', '<b>DeepFlux</b>'],
       "kin.2": ['<b>n38worth</b>', '<b>n38worth</b>'],
       "kin.3": ['<b>Remote</b>', '<b>Remote</b>'],
+      "kin.4": ['<b>ModelSwarm</b>', '<b>ModelSwarm</b>'],
       "pill.rooms.title": ["Rooms with a live host right now — just a count; the server can't see inside any room.", "当前有房主在线的房间数——只是个数字；服务器看不到任何房间的内部。"],
       "pill.live.title": ["Everyone online heartbeats an anonymous session token — no names, no peer ids.", "每位在线者都会匿名地心跳一个会话令牌——没有名字，没有对端 id。"],
       "nav.join": ["Join", "加入"],
